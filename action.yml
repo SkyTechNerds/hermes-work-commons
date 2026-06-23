@@ -66,6 +66,35 @@ runs:
         fi
         echo "ACTION_PATH=$ACTION_PATH" >> "$GITHUB_ENV"
 
+    - name: Build block-deps.json (optional, AEM only)
+      id: block-deps
+      if: inputs.enable_visual_snapshot == 'true'
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        if [ -f "$ACTION_PATH/scripts/build-block-deps.js" ]; then
+          node "$ACTION_PATH/scripts/build-block-deps.js" . block-deps.json 2>/dev/null || \
+            echo "::warning::block-deps-Build fehlgeschlagen — transitive Konsumenten deaktiviert"
+          if [ -f block-deps.json ]; then
+            BYTES=$(stat -c%s block-deps.json 2>/dev/null || echo 0)
+            {
+              echo "status=pass"
+              echo "detail=block-deps.json: ${BYTES} bytes"
+            } >> "$GITHUB_OUTPUT"
+          else
+            {
+              echo "status=warn"
+              echo "detail=block-deps.json nicht erzeugt"
+            } >> "$GITHUB_OUTPUT"
+          fi
+        else
+          {
+            echo "status=skip"
+            echo "detail=build-block-deps.js nicht im Action-Bundle"
+          } >> "$GITHUB_OUTPUT"
+        fi
+
     - name: Fetch PR head
       env:
         HEAD_REF: ${{ github.head_ref }}
