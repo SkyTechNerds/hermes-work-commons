@@ -1,0 +1,64 @@
+# Hermes-Work QA — JUMO-Website-CMS
+#
+# DIESE DATEI GEHT INS KUNDEN-REPO.
+# Pfad: JUMO-GmbH-Co-KG/JUMO-Website-CMS/.github/workflows/hermes-work.yml
+#
+# Alle JUMO-spezifische Logik (Tests, Config, Inline-Checks) liegt in
+# SkyTechNerds/jumo-testing-agent und SkyTechNerds/hermes-work-commons.
+# Hier nur der dünne Aufruf.
+
+name: Hermes-Work QA
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+  pull-requests: write   # fürs Posten des QA-Reports
+
+jobs:
+  qa:
+    name: hermes-work QA Report
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Repo-eigene Lint-Tools mit Repo-Config (ESLint + Stylelint)
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install npm deps
+        run: npm ci --no-audit --no-fund --ignore-scripts
+
+      - name: ESLint (changed files)
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          CHANGED=$(git diff --name-only "origin/${BASE_REF}..HEAD" | grep -E '\.(js|mjs|json)$' || true)
+          [ -n "$CHANGED" ] && npx eslint --no-warn-ignored $CHANGED || echo "Keine JS-Änderungen"
+
+      - name: Stylelint (changed files)
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          CHANGED=$(git diff --name-only "origin/${BASE_REF}..HEAD" | grep -E '\.css$' || true)
+          [ -n "$CHANGED" ] && npx stylelint --allow-empty-input $CHANGED || echo "Keine CSS-Änderungen"
+
+      # Die zentrale Action — macht 8 Standard-Checks + Discord-Mirror
+      - name: hermes-work-commons (Standard + AEM + Visual)
+        uses: SkyTechNerds/hermes-work-commons@v2
+        with:
+          enable_aem_static_scans: 'true'
+          enable_visual_snapshot: 'true'
+          enable_code_review: 'true'
+          base_branch: ${{ github.base_ref }}
+          extra_linters: 'eslint,stylelint'
+          discord_webhook_url: ${{ secrets.DISCORD_WEBHOOK_URL }}

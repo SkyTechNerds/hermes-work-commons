@@ -1,0 +1,41 @@
+# Skycryer JUMO-Website-CMS — Hermes-Work Konfiguration
+#
+# Diese Datei beschreibt die JUMO-spezifischen Konventionen.
+# Wird von der Composite-Action SkyTechNerds/hermes-work-commons@v2 gelesen
+# und an die Checks weitergegeben.
+#
+# Verwendung: optional ins Kunden-Repo kopieren, oder als Referenz hier lassen.
+
+# Pfad-Konventionen (Glob-Pattern, {a,b,c} = alternation, * = wildcard)
+# Wer hier nicht passt, schlägt der Path-Convention-Check fehl.
+path_conventions:
+  - pattern: "blocks/{name}/{name}.{js,css}"
+  - pattern: "blocks/{name}/{name}.js"
+  - pattern: "blocks/{name}/{name}.css"
+  - pattern: "patterns/{organisms,molecules,atoms}/{name}/{file}"
+  - pattern: "scripts/{name}.js"
+  - pattern: "styles/{name}.css"
+  - pattern: "*.md"
+
+# Visual-Snapshot Spec-Matching
+visual:
+  enabled: true
+  spec_dirs:
+    - visual-styleguide
+    - test/visual
+  block_roots:
+    - blocks
+    - patterns/atoms
+    - patterns/molecules
+    - patterns/organisms
+  # block-deps.json wird on-demand gebaut wenn fehlt oder >7 Tage alt
+  block_deps_file: "block-deps.json"
+
+# AEM-spezifische Statik-Checks
+aem:
+  outline_none_exception: false   # WCAG: outline:none verboten
+
+# Linter-Tools (vom Action-Setup-Step installiert)
+linters:
+  - eslint
+  - stylelint

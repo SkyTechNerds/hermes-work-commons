@@ -1,0 +1,99 @@
+{
+  "name": "jumo-inline-checks",
+  "version": "1.0.0",
+  "description": "Semantische Inline-Review-Checks für AEM-EDS-Boilerplate-Blocks. Werden vom Hermes-Bot auf PR-Diffs angewendet und erzeugen zeilengenaue Kommentare.",
+  "patterns": [
+    {
+      "id": "aem-no-framework-imports",
+      "severity": "error",
+      "languages": ["js"],
+      "scope": {"dirs": ["blocks/", "scripts/"]},
+      "description": "Framework-Imports (React/Vue/jQuery) sind in AEM-EDS-Boilerplates verboten — wir nutzen vanilla JS.",
+      "regex": "\\b(import\\s+React|from\\s+['\"]react['\"]|import\\s+Vue|from\\s+['\"]vue['\"]|from\\s+['\"]jquery['\"]|import\\s+\\$)",
+      "message": "Framework-Import verboten — entfernen. AEM-EDS nutzt vanilla JS ohne Build-Step."
+    },
+    {
+      "id": "aem-move-instrumentation-before-textcontent-clear",
+      "severity": "warning",
+      "languages": ["js"],
+      "scope": {"dirs": ["blocks/"]},
+      "description": "Vor jedem block.textContent = '' muss moveInstrumentation(block) aufgerufen werden, sonst verliert AEM die Section-Metadaten.",
+      "regex": "block\\.textContent\\s*=\\s*['\"]['\"]",
+      "context_required": "moveInstrumentation",
+      "message": "Vor diesem textContent-Reset fehlt moveInstrumentation(block) — Section-Metadaten gehen verloren."
+    },
+    {
+      "id": "aem-no-raw-texthtml",
+      "severity": "error",
+      "languages": ["js"],
+      "scope": {"dirs": ["blocks/"]},
+      "description": "Direktes innerHTML = ... ist eine XSS-Lücke. Nutze dompurify oder sichere DOM-Konstruktion.",
+      "regex": "\\.innerHTML\\s*=\\s*(?!.*DOMPurify)",
+      "message": "XSS-Risiko: textHtml sollte nie direkt zugewiesen werden. Sanitize via DOMPurify oder baue den DOM mit createElement."
+    },
+    {
+      "id": "aem-no-inline-style-attr",
+      "severity": "warning",
+      "languages": ["html", "js"],
+      "scope": {"dirs": ["blocks/", "patterns/"]},
+      "description": "Inline-style-Attribute verletzen die Token-Disziplin — nutze CSS-Klassen mit Design-Tokens.",
+      "regex": "style\\s*=\\s*['\"][^'\"]*\\b(color|background|padding|margin|font-size):",
+      "message": "Inline-style-Attribut gefunden — statt dessen CSS-Klasse mit Token (var(--…)) verwenden."
+    },
+    {
+      "id": "aem-responsive-images",
+      "severity": "warning",
+      "languages": ["js"],
+      "scope": {"dirs": ["blocks/"]},
+      "description": "img.src = ... ignoriert Responsive-Image-Pipeline. Nutze createOptimizedPicture().",
+      "regex": "\\.src\\s*=\\s*['\"](?!data:).*\\.(jpg|jpeg|png|webp)",
+      "message": "Direkter img.src-Zuweisung umgeht AEM-Responsive-Image-Pipeline — createOptimizedPicture() nutzen."
+    },
+    {
+      "id": "aem-no-outline-none",
+      "severity": "error",
+      "languages": ["css"],
+      "scope": {"dirs": ["blocks/"]},
+      "description": "outline:none verletzt WCAG 2.4.7 (Focus-Visible). Nutze :focus-visible für Custom-Styles.",
+      "regex": "outline\\s*:\\s*none",
+      "message": "WCAG-Verstoß: outline:none entfernt Focus-Indikator. Nutze :focus-visible { outline: 2px solid var(--link-color); }."
+    },
+    {
+      "id": "aem-css-nesting-depth",
+      "severity": "warning",
+      "languages": ["css"],
+      "scope": {"dirs": ["blocks/"]},
+      "description": "CSS-Nesting tiefer als 3 Ebenen ist schwer wartbar — extrahiere Sub-Komponente.",
+      "regex": "&\\s*[^{]*\\{[^}]*&\\s*[^{]*\\{[^}]*&\\s*[^{]*\\{[^}]*&\\s*[^{]*\\{",
+      "message": "CSS-Nesting > 3 Ebenen — Sub-Komponente extrahieren oder Klassen-Flat-Struktur verwenden."
+    },
+    {
+      "id": "aem-animate-layout-properties",
+      "severity": "warning",
+      "languages": ["css"],
+      "scope": {"dirs": ["blocks/"]},
+      "description": "Animationen auf Layout-Properties (width/height/top/left) sind langsam — transform/opacity nutzen.",
+      "regex": "transition\\s*:\\s*[^;]*(width|height|top|left|right|bottom|margin|padding)",
+      "message": "Animation auf Layout-Property — statt dessen transform/opacity animieren (GPU-beschleunigt, kein Reflow)."
+    },
+    {
+      "id": "aem-touch-target-min-size",
+      "severity": "warning",
+      "languages": ["css"],
+      "scope": {"dirs": ["blocks/"]},
+      "description": "Touch-Targets müssen mind. 44×44px sein (WCAG 2.5.5 / Apple HIG).",
+      "regex": "(button|a|input)[^{]*\\{[^}]*(padding\\s*:\\s*([0-3]?\\dpx|[0-3]?\\d(\\s|;|}))[^;]*){2,}",
+      "message": "Touch-Target vermutlich < 44×44px — padding/min-height auf mind. 44px setzen."
+    },
+    {
+      "id": "aem-no-hardcoded-colors",
+      "severity": "warning",
+      "languages": ["css"],
+      "scope": {"dirs": ["blocks/", "styles/"]},
+      "description": "Hardcodierte Farben (Hex/RGB) verletzen die Token-Disziplin. Nutze var(--color-…).",
+      "regex": "#[0-9a-fA-F]{3,8}\\b|\\brgb\\s*\\(|\\brgba\\s*\\(",
+      "exclude": "var\\(--",
+      "message": "Hardcodierte Farbe gefunden — statt dessen CSS-Variable (var(--color-primary) etc.) nutzen."
+    }
+  ]
+}
