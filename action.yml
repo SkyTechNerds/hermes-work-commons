@@ -17,6 +17,10 @@ inputs:
     description: 'Comma-separated list of additional linters to install'
     required: false
     default: ''
+  discord_webhook_url:
+    description: 'Discord webhook URL (optional - if set, results will be mirrored to Discord)'
+    required: false
+    default: ''
 
 runs:
   using: composite
@@ -80,11 +84,11 @@ runs:
       run: \${{ github.action_path }}/checks/code-review.sh
 
     - name: Mirror to Discord
-      if: always()
+      if: always() && inputs.discord_webhook_url != ''
       shell: bash
       run: \${{ github.action_path }}/checks/discord-mirror.sh
       env:
-        DISCORD_WEBHOOK_URL: \${{ secrets.DISCORD_WEBHOOK_URL }}
+        DISCORD_WEBHOOK_URL: \${{ inputs.discord_webhook_url }}
 
     - name: Post QA Report
       if: always()
