@@ -2,10 +2,6 @@
 # Postet QA-Report als PR-Kommentar via Node-Script.
 # Status-Werte kommen als ENV-Variablen (STATUS_SECRETS, STATUS_DIFF, ...).
 set -e
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-TMPJS=$(mktemp /tmp/hermes-report-XXXX.js)
-cp "$SCRIPT_DIR/post-report.js" "$TMPJS"
-
 # GitHub-API-Call: braucht github-script-Kontext. Wir machen das manuell mit curl+token.
 PR_NUM="$PR_NUMBER"
 REPO="$REPO_FULL"
