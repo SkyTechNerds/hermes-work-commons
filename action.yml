@@ -1,0 +1,102 @@
+name: 'hermes-work-commons'
+description: 'Shared PR-test suite with standard 9-check set'
+inputs:
+  enable_visual_snapshot:
+    description: 'Enable visual snapshot checks'
+    required: false
+    default: 'false'
+  enable_code_review:
+    description: 'Auto-generate code review hints on new PRs'
+    required: false
+    default: 'true'
+  discord_webhook_secret:
+    description: 'Secret name for Discord webhook URL'
+    required: false
+    default: ''
+  base_branch:
+    description: 'Base branch for diff'
+    required: false
+    default: 'main'
+  extra_linters:
+    description: 'Comma-separated list of additional linters to install'
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Read .hermes-work.yml
+      id: config
+      shell: bash
+      run: |
+        if [ -f .hermes-work.yml ]; then
+          echo "config<<EOF" >> "$GITHUB_OUTPUT"
+          cat .hermes-work.yml >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+        else
+          echo "config=" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Setup tools
+      shell: bash
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq yamllint jq
+        if echo "${{ inputs.extra_linters }}" | grep -q ruff; then
+          pip install --quiet ruff
+        fi
+        if echo "${{ inputs.extra_linters }}" | grep -q eslint; then
+          npm install -g eslint 2>/dev/null || true
+        fi
+
+    - name: Fetch PR head
+      shell: bash
+      run: |
+        git fetch --depth=1 origin "${{ github.head_ref }}"
+        git checkout --quiet FETCH_HEAD
+
+    - name: Secret-Scan
+      id: secrets
+      shell: bash
+      run: ${{ github.action_path }}/checks/secret-scan.sh
+    - name: Diff-Size
+      id: diff
+      shell: bash
+      run: ${{ github.action_path }}/checks/diff-size.sh
+    - name: Lint
+      id: lint
+      shell: bash
+      run: ${{ github.action_path }}/checks/lint.sh
+    - name: Path-Convention
+      id: paths
+      shell: bash
+      run: ${{ github.action_path }}/checks/path-convention.sh
+    - name: Review-Coverage
+      id: reviews
+      shell: bash
+      run: ${{ github.action_path }}/checks/review-coverage.sh
+      env:
+        GH_TOKEN: ${{ github.token }}
+    - name: Code-Review
+      id: code-review
+      if: inputs.enable_code_review == 'true'
+      shell: bash
+      run: ${{ github.action_path }}/checks/code-review.sh
+
+    - name: Mirror to Discord
+      if: always() && inputs.discord_webhook_secret != ''
+      shell: bash
+      run: ${{ github.action_path }}/checks/discord-mirror.sh
+      env:
+        DISCORD_WEBHOOK_URL: ${{ secrets[inputs.discord_webhook_secret] }}
+
+    - name: Post QA Report
+      if: always()
+      uses: actions/github-script@v7
+      with:
+        script: ${{ github.action_path }}/scripts/post-report.js
