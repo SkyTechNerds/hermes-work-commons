@@ -1,223 +1,107 @@
-name: 'hermes-work-commons'
-description: 'Shared PR-test suite — Standard-Checks für jedes Repo (Secret-Scan, Diff-Size, Lint, Paths, Review-Coverage, Code-Review, optional Visual/AEM/AEM-Static-Scans)'
+name: 'Notify Discord (Hermes-Work)'
+
+description: >
+  Sendet eine Webhook-Message nach Discord wenn ein PR geöffnet/aktualisiert
+  wird oder ein Kommentar gepostet wird. Macht KEINE Tests selbst.
+  Der Hermes-Bot (auf unserem Server) reagiert auf die Discord-Message
+  und führt die projektspezifischen Tests aus.
+
 inputs:
-  enable_visual_snapshot:
-    description: 'Visual-Snapshot-Checks aktivieren (Playwright)'
-    required: false
-    default: 'false'
-  enable_aem_static_scans:
-    description: 'AEM-spezifische statische Scans aktivieren (Framework-Imports, outline:none, Bundle-Delta)'
-    required: false
-    default: 'false'
-  enable_code_review:
-    description: 'Auto-generate code review hints on new PRs'
-    required: false
-    default: 'true'
-  base_branch:
-    description: 'Base branch for diff'
-    required: false
-    default: 'main'
-  extra_linters:
-    description: 'Comma-separated list of additional linters to install (eslint, stylelint, ruff)'
-    required: false
-    default: ''
-  lint_command:
-    description: 'Override lint command (default: auto-detect by file type)'
-    required: false
-    default: ''
   discord_webhook_url:
-    description: 'Discord webhook URL (optional, falls leer kein Mirror)'
-    required: false
-    default: ''
-  skip_steps:
-    description: 'Komma-getrennte Liste von Steps zum Überspringen (z. B. "visual-snapshot,aem-static")'
-    required: false
+    description: 'Discord-Webhook-URL (Repo-Secret, projektspezifisch)'
+    required: true
     default: ''
 
 runs:
   using: composite
   steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-
-    - name: Setup tools
-      env:
-        EXTRA_LINTERS: ${{ inputs.extra_linters }}
-        LINT_COMMAND: ${{ inputs.lint_command }}
-        ACTION_PATH: ${{ github.action_path }}
-      shell: bash
-      run: |
-        sudo apt-get update -qq
-        sudo apt-get install -y -qq yamllint jq gh
-        sudo wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq
-        sudo chmod +x /usr/local/bin/yq
-        sudo chmod +x "$ACTION_PATH/checks/"*.sh
-        sudo chmod +x "$ACTION_PATH/scripts/"*.sh
-        if echo "$EXTRA_LINTERS" | grep -q ruff; then
-          pip install --quiet ruff
-        fi
-        if echo "$EXTRA_LINTERS" | grep -q eslint; then
-          npm install -g eslint 2>/dev/null || true
-        fi
-        if echo "$EXTRA_LINTERS" | grep -q stylelint; then
-          npm install -g stylelint 2>/dev/null || true
-        fi
-        echo "ACTION_PATH=$ACTION_PATH" >> "$GITHUB_ENV"
-
-    - name: Build block-deps.json (optional, AEM only)
-      id: block-deps
-      if: inputs.enable_visual_snapshot == 'true'
-      shell: bash
-      env:
-        ACTION_PATH: ${{ github.action_path }}
-      run: |
-        if [ -f "$ACTION_PATH/scripts/build-block-deps.js" ]; then
-          node "$ACTION_PATH/scripts/build-block-deps.js" . block-deps.json 2>/dev/null || \
-            echo "::warning::block-deps-Build fehlgeschlagen — transitive Konsumenten deaktiviert"
-          if [ -f block-deps.json ]; then
-            BYTES=$(stat -c%s block-deps.json 2>/dev/null || echo 0)
-            {
-              echo "status=pass"
-              echo "detail=block-deps.json: ${BYTES} bytes"
-            } >> "$GITHUB_OUTPUT"
-          else
-            {
-              echo "status=warn"
-              echo "detail=block-deps.json nicht erzeugt"
-            } >> "$GITHUB_OUTPUT"
-          fi
-        else
-          {
-            echo "status=skip"
-            echo "detail=build-block-deps.js nicht im Action-Bundle"
-          } >> "$GITHUB_OUTPUT"
-        fi
-
-    - name: Fetch PR head
-      env:
-        HEAD_REF: ${{ github.head_ref }}
-        ACTION_PATH: ${{ github.action_path }}
-      shell: bash
-      run: |
-        if [ -n "$HEAD_REF" ]; then
-          git fetch --depth=1 origin "$HEAD_REF" 2>/dev/null || git fetch --depth=1 origin "+${HEAD_REF}"
-          git checkout --quiet FETCH_HEAD 2>/dev/null || git checkout --quiet "$HEAD_REF"
-        fi
-
-    - name: Secret-Scan
-      id: secrets
-      env:
-        BASE_REF: ${{ github.base_ref }}
-        ACTION_PATH: ${{ github.action_path }}
-      shell: bash
-      run: "$ACTION_PATH/checks/secret-scan.sh"
-
-    - name: Diff-Size
-      id: diff
-      env:
-        BASE_REF: ${{ github.base_ref }}
-        ACTION_PATH: ${{ github.action_path }}
-      shell: bash
-      run: "$ACTION_PATH/checks/diff-size.sh"
-
-    - name: Lint
-      id: lint
-      env:
-        BASE_REF: ${{ github.base_ref }}
-        LINT_COMMAND: ${{ inputs.lint_command }}
-        ACTION_PATH: ${{ github.action_path }}
-      shell: bash
-      run: "$ACTION_PATH/checks/lint.sh"
-
-    - name: AEM-Static-Scans
-      id: aem-static
-      if: inputs.enable_aem_static_scans == 'true'
-      env:
-        PR_NUMBER: ${{ github.event.pull_request.number }}
-        BASE_REF: ${{ github.base_ref }}
-        GH_TOKEN: ${{ github.token }}
-        ACTION_PATH: ${{ github.action_path }}
-      shell: bash
-      run: "$ACTION_PATH/checks/aem-static-scans.sh"
-
-    - name: Visual-Snapshot
-      id: visual
-      if: inputs.enable_visual_snapshot == 'true'
-      shell: bash
-      env:
-        PR_NUMBER: ${{ github.event.pull_request.number }}
-        GH_TOKEN: ${{ github.token }}
-        ACTION_PATH: ${{ github.action_path }}
-      run: "$ACTION_PATH/checks/visual-snapshot.sh"
-
-    - name: Path-Convention
-      id: paths
-      env:
-        BASE_REF: ${{ github.base_ref }}
-        ACTION_PATH: ${{ github.action_path }}
-      shell: bash
-      run: "$ACTION_PATH/checks/path-convention.sh"
-
-    - name: Review-Coverage
-      id: reviews
-      shell: bash
-      env:
-        GH_TOKEN: ${{ github.token }}
-        GITHUB_REPOSITORY: ${{ github.repository }}
-        PR_NUMBER: ${{ github.event.pull_request.number }}
-        ACTION_PATH: ${{ github.action_path }}
-      run: "$ACTION_PATH/checks/review-coverage.sh"
-
-    - name: Code-Review
-      id: code-review
-      if: inputs.enable_code_review == 'true'
-      shell: bash
-      env:
-        BASE_REF: ${{ github.base_ref }}
-        GH_TOKEN: ${{ github.token }}
-        GITHUB_REPOSITORY: ${{ github.repository }}
-        PR_NUMBER: ${{ github.event.pull_request.number }}
-        ACTION_PATH: ${{ github.action_path }}
-      run: "$ACTION_PATH/checks/code-review.sh"
-
-    - name: Mirror to Discord
-      if: always() && inputs.discord_webhook_url != ''
+    - name: Build & post Discord notification
       env:
         DISCORD_WEBHOOK_URL: ${{ inputs.discord_webhook_url }}
-        PR_NUMBER: ${{ github.event.pull_request.number }}
+        EVENT_NAME: ${{ github.event_name }}
         REPO_FULL: ${{ github.repository }}
-        HEAD_REF: ${{ github.head_ref }}
-        BASE_REF: ${{ github.base_ref }}
-        STATUS_SECRETS: ${{ steps.secrets.outputs.status }}
-        STATUS_DIFF: ${{ steps.diff.outputs.status }}
-        STATUS_LINT: ${{ steps.lint.outputs.status }}
-        STATUS_AEM_STATIC: ${{ steps.aem-static.outputs.status }}
-        STATUS_VISUAL: ${{ steps.visual.outputs.status }}
-        STATUS_PATHS: ${{ steps.paths.outputs.status }}
-        STATUS_REVIEWS: ${{ steps.reviews.outputs.status }}
-        STATUS_CODE_REVIEW: ${{ steps.code-review.outputs.status }}
-        ACTION_PATH: ${{ github.action_path }}
+        PR_NUMBER: ${{ github.event.number }}
+        PR_TITLE: ${{ github.event.pull_request.title }}
+        PR_SENDER: ${{ github.event.sender.login }}
+        PR_HEAD: ${{ github.head_ref }}
+        PR_BASE: ${{ github.base_ref }}
+        PR_COMMIT: ${{ github.event.pull_request.head.sha }}
+        PR_URL: ${{ github.event.pull_request.html_url }}
+        COMMENT_BODY: ${{ github.event.comment.body }}
+        COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
       shell: bash
-      run: "$ACTION_PATH/checks/discord-mirror.sh"
+      run: |
+        if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+          echo "::error::DISCORD_WEBHOOK_URL ist nicht gesetzt"
+          exit 0
+        fi
 
-    - name: Post QA Report
-      if: always()
-      env:
-        GITHUB_TOKEN: ${{ github.token }}
-        PR_NUMBER: ${{ github.event.pull_request.number }}
-        REPO_FULL: ${{ github.repository }}
-        HEAD_REF: ${{ github.head_ref }}
-        BASE_REF: ${{ github.base_ref }}
-        STATUS_SECRETS: ${{ steps.secrets.outputs.status }}
-        STATUS_DIFF: ${{ steps.diff.outputs.status }}
-        STATUS_LINT: ${{ steps.lint.outputs.status }}
-        STATUS_AEM_STATIC: ${{ steps.aem-static.outputs.status }}
-        STATUS_VISUAL: ${{ steps.visual.outputs.status }}
-        STATUS_PATHS: ${{ steps.paths.outputs.status }}
-        STATUS_REVIEWS: ${{ steps.reviews.outputs.status }}
-        STATUS_CODE_REVIEW: ${{ steps.code-review.outputs.status }}
-        ACTION_PATH: ${{ github.action_path }}
-      shell: bash
-      run: "$ACTION_PATH/scripts/post-report.sh"
+        case "$EVENT_NAME" in
+          pull_request)
+            # PR-Open/Synchronize: sage Discord Bescheid, dass ein PR offen/aktualisiert wurde
+            # Hermes-Bot greift das auf, resolved Repo → führt Tests aus
+            CONTENT="PR_READY repo=${REPO_FULL} pr=${PR_NUMBER} branch=${PR_HEAD}"
+            PAYLOAD=$(jq -n \
+              --arg content "$CONTENT" \
+              --arg pr "#${PR_NUMBER}" \
+              --arg title "$PR_TITLE" \
+              --arg merge "${PR_HEAD} → ${PR_BASE}" \
+              --arg sender "$PR_SENDER" \
+              --arg commit "${PR_COMMIT:0:7}" \
+              --arg url "$PR_URL" \
+              --arg repo "$REPO_FULL" \
+              --arg branch "$PR_HEAD" \
+              --arg prnum "$PR_NUMBER" \
+              '{
+                "content": ("PR_READY repo=" + $repo + " pr=" + $prnum + " branch=" + $branch),
+                "embeds": [{
+                  "title": "🧪 Neuer PR offen / aktualisiert",
+                  "color": 5814783,
+                  "fields": [
+                    { "name": "PR", "value": $pr, "inline": true },
+                    { "name": "Ersteller", "value": $sender, "inline": true },
+                    { "name": "Commit", "value": $commit, "inline": true },
+                    { "name": "Titel", "value": $title, "inline": false },
+                    { "name": "Branch", "value": $merge, "inline": false },
+                    { "name": "Link", "value": $url, "inline": false }
+                  ],
+                  "footer": { "text": ("PR_READY repo=" + $repo + " pr=" + $prnum) }
+                }]
+              }')
+            ;;
+
+          issue_comment)
+            # Kommentar auf PR
+            PAYLOAD=$(jq -n \
+              --arg repo "$REPO_FULL" \
+              --arg prnum "$PR_NUMBER" \
+              --arg author "$COMMENT_AUTHOR" \
+              --arg body "$COMMENT_BODY" \
+              '{
+                "content": ("PR_COMMENT repo=" + $repo + " pr=" + $prnum),
+                "embeds": [{
+                  "title": ("💬 Neuer Kommentar auf PR #" + $prnum),
+                  "color": 16776960,
+                  "fields": [
+                    { "name": "Author", "value": $author, "inline": true },
+                    { "name": "Repo", "value": $repo, "inline": true },
+                    { "name": "PR", "value": ("#" + $prnum), "inline": true },
+                    { "name": "Text", "value": ($body[0:500]), "inline": false }
+                  ],
+                  "footer": { "text": ("PR_COMMENT repo=" + $repo + " pr=" + $prnum) }
+                }]
+              }')
+            CONTENT="PR_COMMENT repo=${REPO_FULL} pr=${PR_NUMBER}"
+            ;;
+
+          *)
+            echo "::notice::Unbekannter Event: $EVENT_NAME — kein Webhook"
+            exit 0
+            ;;
+        esac
+
+        echo "Sende: $CONTENT"
+        curl -fsS -X POST "$DISCORD_WEBHOOK_URL" \
+          -H "Content-Type: application/json" \
+          -d "$PAYLOAD" \
+        || echo "::warning::Discord-Webhook fehlgeschlagen (non-fatal)"

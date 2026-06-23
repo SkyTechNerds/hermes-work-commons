@@ -1,146 +1,130 @@
 # hermes-work-commons
 
-Zentrales PR-Testing für **alle** SkyTechNerds-Repos. Eine Composite GitHub
-Action mit dem Standard-Check-Set, plus projektspezifische Agent-Configs.
+Geteilte Webhook-Discord-Action + Test-Logik für alle SkyTechNerds-Projekte.
+**Die Action macht keine Tests.** Sie postet nur Discord-Messages.
+Tests laufen auf unserem Server (LXC 113) vom Hermes-Bot.
+
+## Architektur
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│ Kunden-Repo (z. B. JUMO-GmbH-Co-KG/JUMO-Website-CMS)          │
+│                                                                │
+│   .github/workflows/hermes-work.yml (~10 Zeilen)               │
+│     → on: pull_request, issue_comment                          │
+│     → uses: SkyTechNerds/hermes-work-commons@v2                │
+│     → with: discord_webhook_url: ${{ secrets.DISCORD_... }}     │
+└────────────────────────────┬───────────────────────────────────┘
+                             │ Webhook-POST
+                             ▼
+┌────────────────────────────────────────────────────────────────┐
+│ Discord (z. B. #qa-department)                                 │
+│ Message: "PR_READY repo=JUMO-... pr=42 branch=wcms-..."        │
+└────────────────────────────┬───────────────────────────────────┘
+                             │ Hermes-Bot lauscht
+                             ▼
+┌────────────────────────────────────────────────────────────────┐
+│ LXC 113 (192.168.2.81) — Hermes-Bot                           │
+│                                                                │
+│   bots/_common/discord-listener.js  - liest Messages           │
+│   bots/_common/repo-resolver.js     - Repo → lokaler Pfad      │
+│   bots/_common/comment-poster.js    - GitHub-API               │
+│   bots/jumo/run.js                  - 9 JUMO-Checks            │
+│   bots/ha/test-pr.sh                - 5 HA-Checks              │
+│   ...                                                          │
+│                                                                │
+│ Führt Tests aus, postet Report zurück nach Discord + als       │
+│ PR-Kommentar, macht Inline-Code-Review.                        │
+└────────────────────────────────────────────────────────────────┘
+```
 
 ## Repo-Struktur
 
 ```
-.
-├── action.yml                          # Composite-Action-Definition
-├── checks/                             # 8 Standard-Check-Skripte (Bash)
-│   ├── secret-scan.sh
-│   ├── diff-size.sh
-│   ├── lint.sh
-│   ├── aem-static-scans.sh             # AEM: Framework-Imports, outline:none
-│   ├── visual-snapshot.sh              # 3-stufiges Spec-Matching
-│   ├── path-convention.sh
-│   ├── review-coverage.sh
-│   └── code-review.sh
-├── scripts/                            # Helper-Skripte
-│   ├── post-report.sh                  # PR-Kommentar-Poster
-│   ├── discord-mirror.sh               # Discord-Webhook
-│   ├── build-block-deps.js             # AEM-Block-Dependency-Index
-│   └── visual-transitive.js            # transitive Visual-Konsumenten
-├── agents/                             # Projektspezifische Setups
-│   ├── jumo/                           # JUMO-Website-CMS (AEM-EDS)
-│   │   ├── README.md
-│   │   ├── templates/
-│   │   │   ├── hermes-work.yml         # → ins Kunden-Repo
-│   │   │   └── .hermes-work.yml        # → optional ins Kunden-Repo
-│   │   ├── inline-checks/
-│   │   │   └── patterns.json           # AEM-Pattern (moveInstrumentation, XSS, …)
-│   │   ├── run-inline-checks.js        # Diff → zeilengenaue Findings
-│   │   └── test-fixtures/
-│   │       └── bad-block.diff
-│   └── ha/                             # [geplant] Home-Assistant
-└── wiki/                               # Doku-Mirror (siehe /mnt/wiki)
+hermes-work-commons/
+├── action.yml                          # Webhook-Discord-POST (komplette Action)
+├── README.md
+├── LICENSE
+├── examples/                           # Beispiel-Workflows für Kunden-Repos
+│   ├── jumo-hermes-work.yml           # ~10 Zeilen für JUMO
+│   └── ha-hermes-work.yml             # ~10 Zeilen für HA
+└── bots/                               # Hermes-Bot-Code (läuft auf LXC 113)
+    ├── _common/                        # gemeinsame Listener/Poster
+    ├── jumo/                           # JUMO-spezifisch
+    │   ├── run.js                      # 9 JUMO-Checks (Node)
+    │   ├── build-block-deps.js         # AEM-Block-Dependency-Index
+    │   ├── review-comment.sh           # Inline-Kommentar-Poster
+    │   └── test-pr.sh                  # LXC-Wrapper
+    └── ha/                             # HA-spezifisch
+        ├── test-pr.sh                  # 5 HA-Checks (Bash)
+        ├── render-report.py            # Report-Renderer
+        ├── post-comment.py             # PR-Kommentar-Poster
+        └── SETUP.md                    # HA-spezifische Doku
 ```
 
-## Standard-Check-Set (8 Checks)
+## Verwendung in einem neuen Repo
 
-| # | Check | Default |
-|---|-------|---------|
-| 1 | Secret-Scan | ✅ immer |
-| 2 | Diff-Size | ✅ immer |
-| 3 | Lint (ESLint/Stylelint/Ruff/yamllint) | ✅ immer |
-| 4 | AEM-Static-Scans | opt-in |
-| 5 | Visual-Snapshot (Playwright Spec-Match) | opt-in |
-| 6 | Path-Convention | ✅ immer |
-| 7 | Review-Coverage | ✅ immer |
-| 8 | Code-Review (auto-hints) | ✅ immer |
+### 1) Workflow-Datei anlegen (10 Zeilen)
 
-## Verwendung
-
-### Minimal (alle Repos)
-
-In deinem Repo unter `.github/workflows/qa.yml`:
+`.github/workflows/hermes-work.yml`:
 
 ```yaml
-name: QA
+name: Notify Discord
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
-
+    types: [opened, synchronize, edited]
+  issue_comment:
+    types: [created]
 permissions:
   contents: read
-  pull-requests: write
-
 jobs:
-  qa:
+  notify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
       - uses: SkyTechNerds/hermes-work-commons@v2
         with:
-          enable_code_review: 'true'
           discord_webhook_url: ${{ secrets.DISCORD_WEBHOOK_URL }}
 ```
 
-### JUMO-spezifisch (AEM-EDS-Boilerplate)
+### 2) Repo-Secret
 
-Siehe `agents/jumo/templates/hermes-work.yml` — minimaler Wrapper mit
-ESLint/Stylelint-Setup vor dem Action-Call. **Das ist die einzige Datei,
-die ins Kunden-Repo `JUMO-GmbH-Co-KG/JUMO-Website-CMS` kopiert wird.**
+`DISCORD_WEBHOOK_URL` = Webhook des Discord-Channels (z. B. `#qa-department`).
 
-### Home-Assistant (geplant)
+### 3) Hermes-Bot konfigurieren (auf LXC 113)
 
-Siehe `agents/ha/` — kommt wenn der HA-Workflow migriert wird.
+`bots/_common/repo-resolver.js` muss das neue Repo kennen:
 
-## Konfiguration pro Consumer-Repo
-
-Per `.hermes-work.yml` im Consumer-Repo (optional, mit sinnvollen Defaults):
-
-```yaml
-path_conventions:
-  - pattern: "blocks/{name}/{name}.{js,css}"
-
-aem:
-  outline_none_exception: false
-
-visual:
-  spec_dirs: [visual-styleguide, test/visual]
-  block_roots: [blocks, patterns/atoms, patterns/molecules, patterns/organisms]
+```js
+const REPOS = {
+  'JUMO-GmbH-Co-KG/JUMO-Website-CMS': '/opt/jumo-cms',
+  'SkyTechNerds/homeassistant-config': '/opt/ha-repo',
+  'Deine-Org/Neues-Repo': '/opt/neues-repo-local',  // <- neu hinzufügen
+};
 ```
 
-## Agent-Workflow
-
-`SkyTechNerds/hermes-work-commons` ist nicht nur eine Action, sondern auch
-die Heimat für **alle** projektspezifischen Testing-Konfigurationen:
-
-- Templates (was ins jeweilige Kunden-Repo kopiert wird)
-- Inline-Check-Pattern (semantische Review-Hints, vom Hermes-Bot genutzt)
-- Test-Fixtures und Runner-Helper
-
-**Was NICHT in dieses Repo darf:**
-- Kunden-Repo-Inhalte
-- Geheimnisse (Token, Webhook-URLs)
-- Build-Artefakte
+Fertig. Die Action postet, der Bot resolved, führt die Tests aus, postet Report.
 
 ## Versionierung
 
-- `@v2.1` — Stable, Bug-Fixes
-- `@v2` — Auto-Updates auf neueste v2.x (Standard)
-- `@main` — Bleeding Edge
+- `@v2.3` — Minimal-Action: nur Webhook-POST (aktuell)
+- `@v2.x` — frühere Versionen mit Test-Checks (überholt)
+- `@v1` — erste Generation
 
-Major-Bumps (`v3`) nur bei Input-Namen-Änderung oder Output-Format-Bruch.
-
-## Entwicklung
+## Bot-Deployment (LXC 113)
 
 ```bash
-# Action lokal testen (im Consumer-Repo):
-act pull_request -W .github/workflows/qa.yml  # benötigt act
+# Repo klonen:
+git clone https://github.com/SkyTechNerds/hermes-work-commons.git /opt/hermes-work-commons
 
-# Inline-Check-Runner testen:
-node agents/jumo/run-inline-checks.js agents/jumo/test-fixtures/bad-block.diff
+# Bot-Code symlinken:
+ln -sf /opt/hermes-work-commons/bots/jumo /opt/jumo-testing
+ln -sf /opt/hermes-work-commons/bots/ha /opt/ha-testing
+
+# Bot neu starten (Discord-Listener):
+systemctl restart hermes-bot
 ```
 
 ## Lizenz
 
 Apache 2.0 — siehe LICENSE.
-
-## Wiki
-
-Vollständige Doku: `/mnt/wiki/02_reference/handbooks/hermes-work-standards.md`
-JUMO-spezifische Migration: `/mnt/wiki/02_reference/handbooks/jumo-work-onboarding.md`

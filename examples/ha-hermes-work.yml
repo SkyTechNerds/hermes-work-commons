@@ -1,0 +1,19 @@
+# Beispiel-Workflow für SkyTechNerds/homeassistant-config
+# Pfad: .github/workflows/hermes-work.yml
+
+name: Notify Discord (Hermes-Work)
+on:
+  pull_request:
+    types: [opened, synchronize, edited]
+  issue_comment:
+    types: [created]
+permissions:
+  contents: read
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: SkyTechNerds/hermes-work-commons@v2
+        with:
+          discord_webhook_url: ${{ secrets.DISCORD_WEBHOOK_URL }}
