@@ -1,8 +1,13 @@
 #!/bin/bash
-# hermes-work — Wrapper für den jumo-testing-Runner.
-# Setzt Token (aus geschützter Datei) + Repo-Dir und ruft run.js.
+# hermes-work — JUMO-Bot-Wrapper.
+# Setzt Token via load-token.sh + Repo-Dir und ruft run.js.
 # Usage: test-pr.sh <branch> <pr> [base=dev] [mode=collect]
-set -euo pipefail
-export GITHUB_TOKEN="$(cat /opt/jumo-testing/.token)"
-export REPO_DIR=/opt/jumo-cms
-exec node /opt/jumo-testing/run.js "$@"
+set -uo pipefail
+
+# Token aus BW / Env / Cache laden
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=_common/load-token.sh
+source "$SCRIPT_DIR/../_common/load-token.sh"
+
+export REPO_DIR="${REPO_DIR:-/opt/jumo-cms}"
+exec node "$SCRIPT_DIR/run.js" "$@"

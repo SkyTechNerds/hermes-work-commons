@@ -14,6 +14,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: SkyTechNerds/hermes-work-commons@v2
+      - uses: SkyTechNerds/hermes-work-commons@v3
         with:
           discord_webhook_url: ${{ secrets.DISCORD_WEBHOOK_URL }}
