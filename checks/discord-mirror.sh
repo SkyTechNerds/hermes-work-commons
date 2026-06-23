@@ -5,51 +5,35 @@ if [ -z "$DISCORD_WEBHOOK_URL" ]; then
   exit 0
 fi
 
-ICON() {
+ICON_TO_EMOJI() {
   case "$1" in
-    pass) echo "PASS_OK";;
-    fail) echo "FAIL_X";;
-    warn) echo "WARN_BANG";;
-    *)    echo "SKIP_ARR";;
+    pass) echo "E_PASS";;
+    fail) echo "E_FAIL";;
+    warn) echo "E_WARN";;
+    *)    echo "E_SKIP";;
   esac
 }
 
-# Status pro Step aus den env-Variablen lesen
-YL_RAW='${{ steps.secrets.outputs.status }}'
-SC_RAW='${{ steps.diff.outputs.status }}'
-LT_RAW='${{ steps.lint.outputs.status }}'
-PA_RAW='${{ steps.paths.outputs.status }}'
-RV_RAW='${{ steps.reviews.outputs.status }}'
-CR_RAW='${{ steps.code-review.outputs.status }}'
-
-YI=$(ICON "$YL_RAW")
-SI=$(ICON "$SC_RAW")
-LI=$(ICON "$LT_RAW")
-PI=$(ICON "$PA_RAW")
-RI=$(ICON "$RV_RAW")
-CI=$(ICON "$CR_RAW")
-
-# Mapping zurueck zu Emoji
 EMOJI() {
   case "$1" in
-    PASS_OK) echo "✅";;
-    FAIL_X) echo "❌";;
-    WARN_BANG) echo "⚠️";;
+    E_PASS) echo "✅";;
+    E_FAIL) echo "❌";;
+    E_WARN) echo "⚠️";;
     *) echo "⏭️";;
   esac
 }
 
-YI=$(EMOJI "$YI")
-SI=$(EMOJI "$SI")
-LI=$(EMOJI "$LI")
-PI=$(EMOJI "$PI")
-RI=$(EMOJI "$RI")
-CI=$(EMOJI "$CI")
+YL=$(EMOJI $(ICON_TO_EMOJI '${{ steps.secrets.outputs.status }}'))
+SC=$(EMOJI $(ICON_TO_EMOJI '${{ steps.diff.outputs.status }}'))
+LT=$(EMOJI $(ICON_TO_EMOJI '${{ steps.lint.outputs.status }}'))
+PA=$(EMOJI $(ICON_TO_EMOJI '${{ steps.paths.outputs.status }}'))
+RV=$(EMOJI $(ICON_TO_EMOJI '${{ steps.reviews.outputs.status }}'))
+CR=$(EMOJI $(ICON_TO_EMOJI '${{ steps.code-review.outputs.status }}'))
 
 PR_NUM='${{ github.event.pull_request.number }}'
 REPO_NAME='${{ github.repository }}'
 
-SUMMARY="**PR #${PR_NUM}** — ${YI} secret-scan · ${SI} diff-size · ${LI} lint · ${PI} paths · ${RI} reviews · ${CI} code-review"
+SUMMARY="**PR #${PR_NUM}** — ${YL} secret-scan · ${SC} diff-size · ${LT} lint · ${PA} paths · ${RV} reviews · ${CR} code-review"
 PAYLOAD=$(jq -n --arg c "🤖 hermes-work QA Report\n${SUMMARY}\n<https://github.com/${REPO_NAME}/pull/${PR_NUM}|View PR>" '{content: $c}')
 
 curl -fsS -H "Content-Type: application/json" -d "$PAYLOAD" "$DISCORD_WEBHOOK_URL"

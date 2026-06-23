@@ -1,23 +1,25 @@
-// Postet QA-Report als PR-Kommentar — JUMO-konsistentes Format
-module.exports = async ({ github, context }) => {
-  const statusOf = (id) => {
-    return process.env[`STEP_${id.toUpperCase()}_STATUS`] || 'skip';
-  };
-  const checks = ['secrets', 'diff', 'lint', 'paths', 'reviews', 'code-review'];
-  const labels = {
-    secrets: 'Secret-Scan',
-    diff: 'Diff-Size',
-    lint: 'Lint',
-    paths: 'Path-Convention',
-    reviews: 'Review-Coverage',
-    'code-review': 'Code-Review'
-  };
-  const icon = { pass: '✅', fail: '❌', warn: '⚠️', skip: '⏭️' };
+// Postet QA-Report als PR-Kommentar. Status aus ENV-Variablen.
+const icon = { pass: '✅', fail: '❌', warn: '⚠️', skip: '⏭️' };
 
+function statusOf(name) {
+  return (process.env[`STATUS_${name.toUpperCase().replace(/-/g, '_')}`] || 'skip').toLowerCase();
+}
+
+const checks = ['secrets', 'diff', 'lint', 'paths', 'reviews', 'code-review'];
+const labels = {
+  secrets: 'Secret-Scan',
+  diff: 'Diff-Size',
+  lint: 'Lint',
+  paths: 'Path-Convention',
+  reviews: 'Review-Coverage',
+  'code-review': 'Code-Review'
+};
+
+module.exports = async ({ github, context }) => {
   const rows = checks.map(c => {
     const s = statusOf(c);
     return `| ${icon[s] || '❔'} | **${labels[c]}** | ${s} |`;
-  }).join('\n');
+  }).join('\\n');
 
   const allGreen = checks.every(c => {
     const s = statusOf(c);
@@ -25,17 +27,22 @@ module.exports = async ({ github, context }) => {
   });
 
   const pr = context.payload.pull_request;
+  const base = pr.base.ref;
+  const head = pr.head.ref;
+
   const body = [
     '## 🤖 hermes-work QA Report',
     '',
-    `PR #${pr.number} · \`${pr.head.ref}\` → \`${context.payload.repository.default_branch || 'main'}\``,
+    `PR #${pr.number} · \`${head}\` → \`${base}\``,
     '',
     '| Status | Check | Result |',
     '|--------|-------|--------|',
     rows,
     '',
-    allGreen ? '✅ **All checks green.**' : '⚠️ **Action required** — see failed checks.'
-  ].join('\n');
+    allGreen ? '✅ **All checks green.**' : '⚠️ **Action required** — see failed checks.',
+    '',
+    '_[Posted by hermes-work-commons v1.0.1](https://github.com/SkyTechNerds/hermes-work-commons)_'
+  ].join('\\n');
 
   await github.rest.issues.createComment({
     issue_number: context.issue.number,
