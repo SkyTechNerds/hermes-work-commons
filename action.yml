@@ -31,71 +31,70 @@ runs:
       run: |
         sudo apt-get update -qq
         sudo apt-get install -y -qq yamllint jq gh
-        # yq fuer path-convention-check
         sudo wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq
         sudo chmod +x /usr/local/bin/yq
-        if echo "${{ inputs.extra_linters {{" | grep -q ruff; then
+        if echo "\${{ inputs.extra_linters }}" | grep -q ruff; then
           pip install --quiet ruff
         fi
-        if echo "${{ inputs.extra_linters {{" | grep -q eslint; then
+        if echo "\${{ inputs.extra_linters }}" | grep -q eslint; then
           npm install -g eslint 2>/dev/null || true
         fi
 
     - name: Fetch PR head
       shell: bash
       run: |
-        git fetch --depth=1 origin "${{ github.head_ref {{"
+        git fetch --depth=1 origin "\${{ github.head_ref }}"
         git checkout --quiet FETCH_HEAD
 
     - name: Secret-Scan
       id: secrets
       shell: bash
-      run: ${{ github.action_path {{/checks/secret-scan.sh
+      run: \${{ github.action_path }}/checks/secret-scan.sh
 
     - name: Diff-Size
       id: diff
       shell: bash
-      run: ${{ github.action_path {{/checks/diff-size.sh
+      run: \${{ github.action_path }}/checks/diff-size.sh
 
     - name: Lint
       id: lint
       shell: bash
-      run: ${{ github.action_path {{/checks/lint.sh
+      run: \${{ github.action_path }}/checks/lint.sh
 
     - name: Path-Convention
       id: paths
       shell: bash
-      run: ${{ github.action_path {{/checks/path-convention.sh
+      run: \${{ github.action_path }}/checks/path-convention.sh
 
     - name: Review-Coverage
       id: reviews
       shell: bash
-      run: ${{ github.action_path {{/checks/review-coverage.sh
+      run: \${{ github.action_path }}/checks/review-coverage.sh
       env:
-        GH_TOKEN: ${{ github.token {{
+        GH_TOKEN: \${{ github.token }}
 
     - name: Code-Review
       id: code-review
       if: inputs.enable_code_review == 'true'
       shell: bash
-      run: ${{ github.action_path {{/checks/code-review.sh
+      run: \${{ github.action_path }}/checks/code-review.sh
 
     - name: Mirror to Discord
       if: always()
       shell: bash
-      run: ${{ github.action_path {{/checks/discord-mirror.sh
+      run: \${{ github.action_path }}/checks/discord-mirror.sh
       env:
-        DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL {{
+        DISCORD_WEBHOOK_URL: \${{ secrets.DISCORD_WEBHOOK_URL }}
 
     - name: Post QA Report
       if: always()
       uses: actions/github-script@v7
       env:
-        STATUS_SECRETS: ${{ steps.secrets.outputs.status {{
-        STATUS_DIFF: ${{ steps.diff.outputs.status {{
-        STATUS_LINT: ${{ steps.lint.outputs.status {{
-        STATUS_PATHS: ${{ steps.paths.outputs.status {{
-        STATUS_REVIEWS: ${{ steps.reviews.outputs.status {{
-        STATUS_CODE_REVIEW: ${{ steps.code-review.outputs.status {{
+        STATUS_SECRETS: \${{ steps.secrets.outputs.status }}
+        STATUS_DIFF: \${{ steps.diff.outputs.status }}
+        STATUS_LINT: \${{ steps.lint.outputs.status }}
+        STATUS_PATHS: \${{ steps.paths.outputs.status }}
+        STATUS_REVIEWS: \${{ steps.reviews.outputs.status }}
+        STATUS_CODE_REVIEW: \${{ steps.code-review.outputs.status }}
       with:
-        script: ${{ github.action_path {{/scripts/post-report.js
+        script: \${{ github.action_path }}/scripts/post-report.js
