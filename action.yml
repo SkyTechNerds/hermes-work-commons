@@ -11,6 +11,10 @@ inputs:
     description: 'Discord-Webhook-URL (Repo-Secret, projektspezifisch)'
     required: true
     default: ''
+  trigger_prefix:
+    description: 'Footer-Prefix für die Bot-Trigger-Erkennung. Default PR_READY, JUMO nutzt JUMO_TEST_REQUEST.'
+    required: false
+    default: 'PR_READY'
 
 runs:
   using: composite
@@ -18,6 +22,7 @@ runs:
     - name: Build & post Discord notification
       env:
         DISCORD_WEBHOOK_URL: ${{ inputs.discord_webhook_url }}
+        TRIGGER_PREFIX: ${{ inputs.trigger_prefix }}
         EVENT_NAME: ${{ github.event_name }}
         REPO_FULL: ${{ github.repository }}
         PR_NUMBER: ${{ github.event.number }}
@@ -40,7 +45,7 @@ runs:
           pull_request)
             # PR-Open/Synchronize: sage Discord Bescheid, dass ein PR offen/aktualisiert wurde
             # Hermes-Bot greift das auf, resolved Repo → führt Tests aus
-            CONTENT="PR_READY repo=${REPO_FULL} pr=${PR_NUMBER} branch=${PR_HEAD}"
+            CONTENT="${TRIGGER_PREFIX} repo=${REPO_FULL} pr=${PR_NUMBER} branch=${PR_HEAD}"
             PAYLOAD=$(jq -n \
               --arg content "$CONTENT" \
               --arg pr "#${PR_NUMBER}" \
@@ -52,8 +57,9 @@ runs:
               --arg repo "$REPO_FULL" \
               --arg branch "$PR_HEAD" \
               --arg prnum "$PR_NUMBER" \
+              --arg trigger "$TRIGGER_PREFIX" \
               '{
-                "content": ("PR_READY repo=" + $repo + " pr=" + $prnum + " branch=" + $branch),
+                "content": ($trigger + " repo=" + $repo + " pr=" + $prnum + " branch=" + $branch),
                 "embeds": [{
                   "title": "🧪 Neuer PR offen / aktualisiert",
                   "color": 5814783,
@@ -65,7 +71,7 @@ runs:
                     { "name": "Branch", "value": $merge, "inline": false },
                     { "name": "Link", "value": $url, "inline": false }
                   ],
-                  "footer": { "text": ("PR_READY repo=" + $repo + " pr=" + $prnum) }
+                  "footer": { "text": ($trigger + " repo=" + $repo + " pr=" + $prnum) }
                 }]
               }')
             ;;
@@ -77,8 +83,9 @@ runs:
               --arg prnum "$PR_NUMBER" \
               --arg author "$COMMENT_AUTHOR" \
               --arg body "$COMMENT_BODY" \
+              --arg trigger "$TRIGGER_PREFIX" \
               '{
-                "content": ("PR_COMMENT repo=" + $repo + " pr=" + $prnum),
+                "content": ($trigger + "_COMMENT repo=" + $repo + " pr=" + $prnum),
                 "embeds": [{
                   "title": ("💬 Neuer Kommentar auf PR #" + $prnum),
                   "color": 16776960,
@@ -88,10 +95,10 @@ runs:
                     { "name": "PR", "value": ("#" + $prnum), "inline": true },
                     { "name": "Text", "value": ($body[0:500]), "inline": false }
                   ],
-                  "footer": { "text": ("PR_COMMENT repo=" + $repo + " pr=" + $prnum) }
+                  "footer": { "text": ($trigger + "_COMMENT repo=" + $repo + " pr=" + $prnum) }
                 }]
               }')
-            CONTENT="PR_COMMENT repo=${REPO_FULL} pr=${PR_NUMBER}"
+            CONTENT="${TRIGGER_PREFIX}_COMMENT repo=${REPO_FULL} pr=${PR_NUMBER}"
             ;;
 
           *)
