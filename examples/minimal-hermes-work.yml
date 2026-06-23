@@ -1,0 +1,28 @@
+# Minimale Vorlage für NEUE Projekte.
+# 1:1 kopieren als .github/workflows/hermes-work.yml ins Kunden-Repo.
+#
+# Voraussetzungen im Repo:
+#   - GitHub-Secret DISCORD_WEBHOOK_URL zeigt auf den Discord-Channel für dieses Projekt
+#
+# Was diese Action tut: NUR Discord-Webhook-POST bei PR-Open/Sync/Edited
+# und bei PR-Kommentaren. KEINE Tests in GitHub. Tests laufen auf
+# LXC 113 vom Hermes-Bot (siehe hermes-work-standards.md).
+
+name: Notify Discord (Hermes-Work)
+on:
+  pull_request:
+    types: [opened, synchronize, edited]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: SkyTechNerds/hermes-work-commons@v3
+        with:
+          discord_webhook_url: ${{ secrets.DISCORD_WEBHOOK_URL }}

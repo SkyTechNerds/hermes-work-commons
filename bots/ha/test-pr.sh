@@ -3,17 +3,15 @@
 # Usage: test-pr.sh <branch> <pr> [base=main] [mode=collect]
 set -uo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../_common/load-token.sh
+source "$SCRIPT_DIR/../_common/load-token.sh"
+
 PR="$1"
 BRANCH="$2"
 BASE="${3:-main}"
 MODE="${4:-collect}"
 
-TOKEN_FILE=/opt/h...
-if [ ! -f "$TOKEN_FILE" ]; then
-  echo "FATAL: $TOKEN_FILE fehlt" >&2
-  exit 2
-fi
-export GITHUB_TOKEN=$(cat "$TOKEN_FILE")
 export REPO="SkyTechNerds/homeassistant-config"
 export REPO_DIR="${REPO_DIR:-/opt/ha-config-workdir}"
 
