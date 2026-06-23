@@ -19,7 +19,7 @@ if [ -z "$PATTERNS" ]; then
   exit 0
 fi
 
-CHANGED=$(git diff --name-only "origin/${{ github.base_ref }}..HEAD")
+CHANGED=$(git diff --name-only "origin/${BASE_REF:-${GITHUB_BASE_REF:-main}}..HEAD")
 VIOLATIONS=""
 
 for pattern in $PATTERNS; do

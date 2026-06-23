@@ -1,8 +1,12 @@
 name: 'hermes-work-commons'
-description: 'Shared PR-test suite with standard 6-check set'
+description: 'Shared PR-test suite — Standard-Checks für jedes Repo (Secret-Scan, Diff-Size, Lint, Paths, Review-Coverage, Code-Review, optional Visual/AEM/AEM-Static-Scans)'
 inputs:
   enable_visual_snapshot:
-    description: 'Enable visual snapshot checks'
+    description: 'Visual-Snapshot-Checks aktivieren (Playwright)'
+    required: false
+    default: 'false'
+  enable_aem_static_scans:
+    description: 'AEM-spezifische statische Scans aktivieren (Framework-Imports, outline:none, Bundle-Delta)'
     required: false
     default: 'false'
   enable_code_review:
@@ -14,11 +18,19 @@ inputs:
     required: false
     default: 'main'
   extra_linters:
-    description: 'Comma-separated list of additional linters to install'
+    description: 'Comma-separated list of additional linters to install (eslint, stylelint, ruff)'
+    required: false
+    default: ''
+  lint_command:
+    description: 'Override lint command (default: auto-detect by file type)'
     required: false
     default: ''
   discord_webhook_url:
-    description: 'Discord webhook URL (optional)'
+    description: 'Discord webhook URL (optional, falls leer kein Mirror)'
+    required: false
+    default: ''
+  skip_steps:
+    description: 'Komma-getrennte Liste von Steps zum Überspringen (z. B. "visual-snapshot,aem-static")'
     required: false
     default: ''
 
@@ -33,68 +45,133 @@ runs:
     - name: Setup tools
       env:
         EXTRA_LINTERS: ${{ inputs.extra_linters }}
+        LINT_COMMAND: ${{ inputs.lint_command }}
+        ACTION_PATH: ${{ github.action_path }}
       shell: bash
       run: |
         sudo apt-get update -qq
         sudo apt-get install -y -qq yamllint jq gh
         sudo wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq
         sudo chmod +x /usr/local/bin/yq
-        # Make check scripts executable
-        sudo chmod +x "${{ github.action_path }}/checks/"*.sh
+        sudo chmod +x "$ACTION_PATH/checks/"*.sh
+        sudo chmod +x "$ACTION_PATH/scripts/"*.sh
         if echo "$EXTRA_LINTERS" | grep -q ruff; then
           pip install --quiet ruff
         fi
         if echo "$EXTRA_LINTERS" | grep -q eslint; then
           npm install -g eslint 2>/dev/null || true
         fi
+        if echo "$EXTRA_LINTERS" | grep -q stylelint; then
+          npm install -g stylelint 2>/dev/null || true
+        fi
+        echo "ACTION_PATH=$ACTION_PATH" >> "$GITHUB_ENV"
 
     - name: Fetch PR head
       env:
         HEAD_REF: ${{ github.head_ref }}
+        ACTION_PATH: ${{ github.action_path }}
       shell: bash
       run: |
-        git fetch --depth=1 origin "$HEAD_REF"
-        git checkout --quiet FETCH_HEAD
+        if [ -n "$HEAD_REF" ]; then
+          git fetch --depth=1 origin "$HEAD_REF" 2>/dev/null || git fetch --depth=1 origin "+${HEAD_REF}"
+          git checkout --quiet FETCH_HEAD 2>/dev/null || git checkout --quiet "$HEAD_REF"
+        fi
 
     - name: Secret-Scan
       id: secrets
+      env:
+        BASE_REF: ${{ github.base_ref }}
+        ACTION_PATH: ${{ github.action_path }}
       shell: bash
-      run: ${{ github.action_path }}/checks/secret-scan.sh
+      run: "$ACTION_PATH/checks/secret-scan.sh"
 
     - name: Diff-Size
       id: diff
+      env:
+        BASE_REF: ${{ github.base_ref }}
+        ACTION_PATH: ${{ github.action_path }}
       shell: bash
-      run: ${{ github.action_path }}/checks/diff-size.sh
+      run: "$ACTION_PATH/checks/diff-size.sh"
 
     - name: Lint
       id: lint
+      env:
+        BASE_REF: ${{ github.base_ref }}
+        LINT_COMMAND: ${{ inputs.lint_command }}
+        ACTION_PATH: ${{ github.action_path }}
       shell: bash
-      run: ${{ github.action_path }}/checks/lint.sh
+      run: "$ACTION_PATH/checks/lint.sh"
+
+    - name: AEM-Static-Scans
+      id: aem-static
+      if: inputs.enable_aem_static_scans == 'true'
+      env:
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        BASE_REF: ${{ github.base_ref }}
+        GH_TOKEN: ${{ github.token }}
+        ACTION_PATH: ${{ github.action_path }}
+      shell: bash
+      run: "$ACTION_PATH/checks/aem-static-scans.sh"
+
+    - name: Visual-Snapshot
+      id: visual
+      if: inputs.enable_visual_snapshot == 'true'
+      shell: bash
+      env:
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        GH_TOKEN: ${{ github.token }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: "$ACTION_PATH/checks/visual-snapshot.sh"
 
     - name: Path-Convention
       id: paths
+      env:
+        BASE_REF: ${{ github.base_ref }}
+        ACTION_PATH: ${{ github.action_path }}
       shell: bash
-      run: ${{ github.action_path }}/checks/path-convention.sh
+      run: "$ACTION_PATH/checks/path-convention.sh"
 
     - name: Review-Coverage
       id: reviews
       shell: bash
-      run: ${{ github.action_path }}/checks/review-coverage.sh
       env:
         GH_TOKEN: ${{ github.token }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: "$ACTION_PATH/checks/review-coverage.sh"
 
     - name: Code-Review
       id: code-review
       if: inputs.enable_code_review == 'true'
       shell: bash
-      run: ${{ github.action_path }}/checks/code-review.sh
+      env:
+        BASE_REF: ${{ github.base_ref }}
+        GH_TOKEN: ${{ github.token }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: "$ACTION_PATH/checks/code-review.sh"
 
     - name: Mirror to Discord
       if: always() && inputs.discord_webhook_url != ''
-      shell: bash
-      run: ${{ github.action_path }}/checks/discord-mirror.sh
       env:
         DISCORD_WEBHOOK_URL: ${{ inputs.discord_webhook_url }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        REPO_FULL: ${{ github.repository }}
+        HEAD_REF: ${{ github.head_ref }}
+        BASE_REF: ${{ github.base_ref }}
+        STATUS_SECRETS: ${{ steps.secrets.outputs.status }}
+        STATUS_DIFF: ${{ steps.diff.outputs.status }}
+        STATUS_LINT: ${{ steps.lint.outputs.status }}
+        STATUS_AEM_STATIC: ${{ steps.aem-static.outputs.status }}
+        STATUS_VISUAL: ${{ steps.visual.outputs.status }}
+        STATUS_PATHS: ${{ steps.paths.outputs.status }}
+        STATUS_REVIEWS: ${{ steps.reviews.outputs.status }}
+        STATUS_CODE_REVIEW: ${{ steps.code-review.outputs.status }}
+        ACTION_PATH: ${{ github.action_path }}
+      shell: bash
+      run: "$ACTION_PATH/checks/discord-mirror.sh"
 
     - name: Post QA Report
       if: always()
@@ -107,8 +184,11 @@ runs:
         STATUS_SECRETS: ${{ steps.secrets.outputs.status }}
         STATUS_DIFF: ${{ steps.diff.outputs.status }}
         STATUS_LINT: ${{ steps.lint.outputs.status }}
+        STATUS_AEM_STATIC: ${{ steps.aem-static.outputs.status }}
+        STATUS_VISUAL: ${{ steps.visual.outputs.status }}
         STATUS_PATHS: ${{ steps.paths.outputs.status }}
         STATUS_REVIEWS: ${{ steps.reviews.outputs.status }}
         STATUS_CODE_REVIEW: ${{ steps.code-review.outputs.status }}
+        ACTION_PATH: ${{ github.action_path }}
       shell: bash
-      run: ${{ github.action_path }}/scripts/post-report.sh
+      run: "$ACTION_PATH/scripts/post-report.sh"
