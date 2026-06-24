@@ -1,0 +1,3 @@
+# Common Hermes-Bot-Code (Discord-Listener, Repo-Resolver, Comment-Poster)
+# Wird auf LXC 113 (192.168.2.81) deployed.
+# Nicht Teil der Action — die Action postet nur Discord-Messages.

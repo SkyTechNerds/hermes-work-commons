@@ -1,72 +1,130 @@
 # hermes-work-commons
 
-Shared PR-test suite for all SkyTechNerds repos.
+Geteilte Webhook-Discord-Action + Test-Logik für alle SkyTechNerds-Projekte.
+**Die Action macht keine Tests.** Sie postet nur Discord-Messages.
+Tests laufen auf unserem Server (LXC 113) vom Hermes-Bot.
 
-Eine Composite GitHub Action mit dem Standard-9-Check-Set:
-1. Secret-Scan
-2. Diff-Size
-3. Lint (yamllint / eslint / ruff — je nach Repo)
-4. Path-Convention (projektspezifisch)
-5. Review-Coverage (GitHub-API)
-6. Test-Coverage (wenn Test-Framework vorhanden)
-7. Visual-Snapshot (opt-in)
-8. Code-Review (auto-generated beim Anlegen)
-9. Changelog (wenn CHANGELOG.md existiert)
+## Architektur
 
-## Verwendung
+```
+┌────────────────────────────────────────────────────────────────┐
+│ Kunden-Repo (z. B. JUMO-GmbH-Co-KG/JUMO-Website-CMS)          │
+│                                                                │
+│   .github/workflows/hermes-work.yml (~10 Zeilen)               │
+│     → on: pull_request, issue_comment                          │
+│     → uses: SkyTechNerds/hermes-work-commons@v2                │
+│     → with: discord_webhook_url: ${{ secrets.DISCORD_... }}     │
+└────────────────────────────┬───────────────────────────────────┘
+                             │ Webhook-POST
+                             ▼
+┌────────────────────────────────────────────────────────────────┐
+│ Discord (z. B. #qa-department)                                 │
+│ Message: "PR_READY repo=JUMO-... pr=42 branch=wcms-..."        │
+└────────────────────────────┬───────────────────────────────────┘
+                             │ Hermes-Bot lauscht
+                             ▼
+┌────────────────────────────────────────────────────────────────┐
+│ LXC 113 (192.168.2.81) — Hermes-Bot                           │
+│                                                                │
+│   bots/_common/discord-listener.js  - liest Messages           │
+│   bots/_common/repo-resolver.js     - Repo → lokaler Pfad      │
+│   bots/_common/comment-poster.js    - GitHub-API               │
+│   bots/jumo/run.js                  - 9 JUMO-Checks            │
+│   bots/ha/test-pr.sh                - 5 HA-Checks              │
+│   ...                                                          │
+│                                                                │
+│ Führt Tests aus, postet Report zurück nach Discord + als       │
+│ PR-Kommentar, macht Inline-Code-Review.                        │
+└────────────────────────────────────────────────────────────────┘
+```
 
-In deinem Repo unter `.github/workflows/qa.yml`:
+## Repo-Struktur
+
+```
+hermes-work-commons/
+├── action.yml                          # Webhook-Discord-POST (komplette Action)
+├── README.md
+├── LICENSE
+├── examples/                           # Beispiel-Workflows für Kunden-Repos
+│   ├── jumo-hermes-work.yml           # ~10 Zeilen für JUMO
+│   └── ha-hermes-work.yml             # ~10 Zeilen für HA
+└── bots/                               # Hermes-Bot-Code (läuft auf LXC 113)
+    ├── _common/                        # gemeinsame Listener/Poster
+    ├── jumo/                           # JUMO-spezifisch
+    │   ├── run.js                      # 9 JUMO-Checks (Node)
+    │   ├── build-block-deps.js         # AEM-Block-Dependency-Index
+    │   ├── review-comment.sh           # Inline-Kommentar-Poster
+    │   └── test-pr.sh                  # LXC-Wrapper
+    └── ha/                             # HA-spezifisch
+        ├── test-pr.sh                  # 5 HA-Checks (Bash)
+        ├── render-report.py            # Report-Renderer
+        ├── post-comment.py             # PR-Kommentar-Poster
+        └── SETUP.md                    # HA-spezifische Doku
+```
+
+## Verwendung in einem neuen Repo
+
+### 1) Workflow-Datei anlegen (10 Zeilen)
+
+`.github/workflows/hermes-work.yml`:
 
 ```yaml
-name: QA
+name: Notify Discord
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
-
+    types: [opened, synchronize, edited]
+  issue_comment:
+    types: [created]
+permissions:
+  contents: read
 jobs:
-  qa:
+  notify:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
     steps:
-      - uses: SkyTechNerds/hermes-work-commons@v1
+      - uses: actions/checkout@v4
+      - uses: SkyTechNerds/hermes-work-commons@v2
         with:
-          # Optionale Konfiguration:
-          enable_visual_snapshot: false
-          enable_code_review: true
-          discord_webhook_secret: DISCORD_WEBHOOK_URL
+          discord_webhook_url: ${{ secrets.DISCORD_WEBHOOK_URL }}
 ```
 
-## Konfiguration
+### 2) Repo-Secret
 
-Per `.hermes-work.yml` im Consumer-Repo:
+`DISCORD_WEBHOOK_URL` = Webhook des Discord-Channels (z. B. `#qa-department`).
 
-```yaml
-# Welche Linter-Tools nutzen?
-linters:
-  - yamllint
-  # - eslint
-  # - ruff
+### 3) Hermes-Bot konfigurieren (auf LXC 113)
 
-# Path-Convention: welche Dateien muessen wo liegen?
-path_conventions:
-  - pattern: "blocks/{name}/{name}.{js,css}"
-    message: "Block-Files muessen unter blocks/<name>/<name>.{js,css} liegen"
+`bots/_common/repo-resolver.js` muss das neue Repo kennen:
 
-# Discord-Mirror aktiv?
-discord:
-  channel_name: "ha-qa"
+```js
+const REPOS = {
+  'JUMO-GmbH-Co-KG/JUMO-Website-CMS': '/opt/jumo-cms',
+  'SkyTechNerds/homeassistant-config': '/opt/ha-repo',
+  'Deine-Org/Neues-Repo': '/opt/neues-repo-local',  // <- neu hinzufügen
+};
 ```
 
-## Entwicklung
+Fertig. Die Action postet, der Bot resolved, führt die Tests aus, postet Report.
 
-Lokal testen:
+## Versionierung
+
+- `@v2.3` — Minimal-Action: nur Webhook-POST (aktuell)
+- `@v2.x` — frühere Versionen mit Test-Checks (überholt)
+- `@v1` — erste Generation
+
+## Bot-Deployment (LXC 113)
 
 ```bash
-act pull_request -W .github/workflows/qa.yml  # benoetigt act
+# Repo klonen:
+git clone https://github.com/SkyTechNerds/hermes-work-commons.git /opt/hermes-work-commons
+
+# Bot-Code symlinken:
+ln -sf /opt/hermes-work-commons/bots/jumo /opt/jumo-testing
+ln -sf /opt/hermes-work-commons/bots/ha /opt/ha-testing
+
+# Bot neu starten (Discord-Listener):
+systemctl restart hermes-bot
 ```
 
 ## Lizenz
 
-Private — SkyTechNerds intern.
+Apache 2.0 — siehe LICENSE.

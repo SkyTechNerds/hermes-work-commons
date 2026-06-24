@@ -1,114 +1,114 @@
-name: 'hermes-work-commons'
-description: 'Shared PR-test suite with standard 6-check set'
+name: 'Notify Discord (Hermes-Work)'
+
+description: >
+  Sendet eine Webhook-Message nach Discord wenn ein PR geöffnet/aktualisiert
+  wird oder ein Kommentar gepostet wird. Macht KEINE Tests selbst.
+  Der Hermes-Bot (auf unserem Server) reagiert auf die Discord-Message
+  und führt die projektspezifischen Tests aus.
+
 inputs:
-  enable_visual_snapshot:
-    description: 'Enable visual snapshot checks'
-    required: false
-    default: 'false'
-  enable_code_review:
-    description: 'Auto-generate code review hints on new PRs'
-    required: false
-    default: 'true'
-  base_branch:
-    description: 'Base branch for diff'
-    required: false
-    default: 'main'
-  extra_linters:
-    description: 'Comma-separated list of additional linters to install'
-    required: false
-    default: ''
   discord_webhook_url:
-    description: 'Discord webhook URL (optional)'
-    required: false
+    description: 'Discord-Webhook-URL (Repo-Secret, projektspezifisch)'
+    required: true
     default: ''
+  trigger_prefix:
+    description: 'Footer-Prefix für die Bot-Trigger-Erkennung. Default PR_READY, JUMO nutzt JUMO_TEST_REQUEST.'
+    required: false
+    default: 'PR_READY'
 
 runs:
   using: composite
   steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-
-    - name: Setup tools
-      env:
-        EXTRA_LINTERS: ${{ inputs.extra_linters }}
-      shell: bash
-      run: |
-        sudo apt-get update -qq
-        sudo apt-get install -y -qq yamllint jq gh
-        sudo wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq
-        sudo chmod +x /usr/local/bin/yq
-        # Make check scripts executable
-        sudo chmod +x "${{ github.action_path }}/checks/"*.sh
-        if echo "$EXTRA_LINTERS" | grep -q ruff; then
-          pip install --quiet ruff
-        fi
-        if echo "$EXTRA_LINTERS" | grep -q eslint; then
-          npm install -g eslint 2>/dev/null || true
-        fi
-
-    - name: Fetch PR head
-      env:
-        HEAD_REF: ${{ github.head_ref }}
-      shell: bash
-      run: |
-        git fetch --depth=1 origin "$HEAD_REF"
-        git checkout --quiet FETCH_HEAD
-
-    - name: Secret-Scan
-      id: secrets
-      shell: bash
-      run: ${{ github.action_path }}/checks/secret-scan.sh
-
-    - name: Diff-Size
-      id: diff
-      shell: bash
-      run: ${{ github.action_path }}/checks/diff-size.sh
-
-    - name: Lint
-      id: lint
-      shell: bash
-      run: ${{ github.action_path }}/checks/lint.sh
-
-    - name: Path-Convention
-      id: paths
-      shell: bash
-      run: ${{ github.action_path }}/checks/path-convention.sh
-
-    - name: Review-Coverage
-      id: reviews
-      shell: bash
-      run: ${{ github.action_path }}/checks/review-coverage.sh
-      env:
-        GH_TOKEN: ${{ github.token }}
-
-    - name: Code-Review
-      id: code-review
-      if: inputs.enable_code_review == 'true'
-      shell: bash
-      run: ${{ github.action_path }}/checks/code-review.sh
-
-    - name: Mirror to Discord
-      if: always() && inputs.discord_webhook_url != ''
-      shell: bash
-      run: ${{ github.action_path }}/checks/discord-mirror.sh
+    - name: Build & post Discord notification
       env:
         DISCORD_WEBHOOK_URL: ${{ inputs.discord_webhook_url }}
-
-    - name: Post QA Report
-      if: always()
-      env:
-        GITHUB_TOKEN: ${{ github.token }}
-        PR_NUMBER: ${{ github.event.pull_request.number }}
+        TRIGGER_PREFIX: ${{ inputs.trigger_prefix }}
+        EVENT_NAME: ${{ github.event_name }}
         REPO_FULL: ${{ github.repository }}
-        HEAD_REF: ${{ github.head_ref }}
-        BASE_REF: ${{ github.base_ref }}
-        STATUS_SECRETS: ${{ steps.secrets.outputs.status }}
-        STATUS_DIFF: ${{ steps.diff.outputs.status }}
-        STATUS_LINT: ${{ steps.lint.outputs.status }}
-        STATUS_PATHS: ${{ steps.paths.outputs.status }}
-        STATUS_REVIEWS: ${{ steps.reviews.outputs.status }}
-        STATUS_CODE_REVIEW: ${{ steps.code-review.outputs.status }}
+        PR_NUMBER: ${{ github.event.number }}
+        PR_TITLE: ${{ github.event.pull_request.title }}
+        PR_SENDER: ${{ github.event.sender.login }}
+        PR_HEAD: ${{ github.head_ref }}
+        PR_BASE: ${{ github.base_ref }}
+        PR_COMMIT: ${{ github.event.pull_request.head.sha }}
+        PR_URL: ${{ github.event.pull_request.html_url }}
+        COMMENT_BODY: ${{ github.event.comment.body }}
+        COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
       shell: bash
-      run: ${{ github.action_path }}/scripts/post-report.sh
+      run: |
+        if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+          echo "::error::DISCORD_WEBHOOK_URL ist nicht gesetzt"
+          exit 0
+        fi
+
+        case "$EVENT_NAME" in
+          pull_request)
+            # PR-Open/Synchronize: sage Discord Bescheid, dass ein PR offen/aktualisiert wurde
+            # Hermes-Bot greift das auf, resolved Repo → führt Tests aus
+            CONTENT="${TRIGGER_PREFIX} repo=${REPO_FULL} pr=${PR_NUMBER} branch=${PR_HEAD}"
+            PAYLOAD=$(jq -n \
+              --arg content "$CONTENT" \
+              --arg pr "#${PR_NUMBER}" \
+              --arg title "$PR_TITLE" \
+              --arg merge "${PR_HEAD} → ${PR_BASE}" \
+              --arg sender "$PR_SENDER" \
+              --arg commit "${PR_COMMIT:0:7}" \
+              --arg url "$PR_URL" \
+              --arg repo "$REPO_FULL" \
+              --arg branch "$PR_HEAD" \
+              --arg prnum "$PR_NUMBER" \
+              --arg trigger "$TRIGGER_PREFIX" \
+              '{
+                "content": ($trigger + " repo=" + $repo + " pr=" + $prnum + " branch=" + $branch),
+                "embeds": [{
+                  "title": "🧪 Neuer PR offen / aktualisiert",
+                  "color": 5814783,
+                  "fields": [
+                    { "name": "PR", "value": $pr, "inline": true },
+                    { "name": "Ersteller", "value": $sender, "inline": true },
+                    { "name": "Commit", "value": $commit, "inline": true },
+                    { "name": "Titel", "value": $title, "inline": false },
+                    { "name": "Branch", "value": $merge, "inline": false },
+                    { "name": "Link", "value": $url, "inline": false }
+                  ],
+                  "footer": { "text": ($trigger + " repo=" + $repo + " pr=" + $prnum) }
+                }]
+              }')
+            ;;
+
+          issue_comment)
+            # Kommentar auf PR
+            PAYLOAD=$(jq -n \
+              --arg repo "$REPO_FULL" \
+              --arg prnum "$PR_NUMBER" \
+              --arg author "$COMMENT_AUTHOR" \
+              --arg body "$COMMENT_BODY" \
+              --arg trigger "$TRIGGER_PREFIX" \
+              '{
+                "content": ($trigger + "_COMMENT repo=" + $repo + " pr=" + $prnum),
+                "embeds": [{
+                  "title": ("💬 Neuer Kommentar auf PR #" + $prnum),
+                  "color": 16776960,
+                  "fields": [
+                    { "name": "Author", "value": $author, "inline": true },
+                    { "name": "Repo", "value": $repo, "inline": true },
+                    { "name": "PR", "value": ("#" + $prnum), "inline": true },
+                    { "name": "Text", "value": ($body[0:500]), "inline": false }
+                  ],
+                  "footer": { "text": ($trigger + "_COMMENT repo=" + $repo + " pr=" + $prnum) }
+                }]
+              }')
+            CONTENT="${TRIGGER_PREFIX}_COMMENT repo=${REPO_FULL} pr=${PR_NUMBER}"
+            ;;
+
+          *)
+            echo "::notice::Unbekannter Event: $EVENT_NAME — kein Webhook"
+            exit 0
+            ;;
+        esac
+
+        echo "Sende: $CONTENT"
+        curl -fsS -X POST "$DISCORD_WEBHOOK_URL" \
+          -H "Content-Type: application/json" \
+          -d "$PAYLOAD" \
+        || echo "::warning::Discord-Webhook fehlgeschlagen (non-fatal)"
