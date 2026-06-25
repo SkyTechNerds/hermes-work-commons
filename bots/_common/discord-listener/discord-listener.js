@@ -65,12 +65,21 @@ function log(msg) {
   try { fs.appendFileSync(LOG_PATH, line); } catch {}
 }
 
-// --- Token Loading ---------------------------------------------------------
+// --- Token Loading --------------------------------------------------------
 
-let discordToken, githubToken;
+let discordToken;
+
+// Per-channel GitHub tokens: Map<channelId, string>. Loaded lazily on first
+// trigger per channel so a single broken token file does not prevent the
+// other channels from working.
+const githubTokens = new Map();
 
 function loadDiscordToken() {
   try {
+    const stat = fs.statSync(TOKEN_PATH);
+    if ((stat.mode & 0o077) !== 0) {
+      throw new Error(`token file ${TOKEN_PATH} has permissive mode ${(stat.mode & 0o777).toString(8)} (need 600)`);
+    }
     discordToken = fs.readFileSync(TOKEN_PATH, 'utf8').trim();
     if (!discordToken) throw new Error('empty file');
     log(`discord token loaded (${discordToken.length} chars)`);
@@ -80,21 +89,29 @@ function loadDiscordToken() {
   }
 }
 
-function loadGithubToken() {
-  try {
-    const stat = fs.statSync(GITHUB_TOKEN_PATH);
-    // Refuse to proceed if token file is world-readable — fail-fast on
-    // accidental chmod 644 (or worse). Service runs as root.
-    if ((stat.mode & 0o077) !== 0) {
-      throw new Error(`token file ${GITHUB_TOKEN_PATH} has permissive mode ${(stat.mode & 0o777).toString(8)} (need 600)`);
-    }
-    githubToken = fs.readFileSync(GITHUB_TOKEN_PATH, 'utf8').trim();
-    if (!githubToken) throw new Error('empty file');
-    log(`github token loaded (${githubToken.length} chars)`);
-  } catch (e) {
-    log(`FATAL: cannot read github token from ${GITHUB_TOKEN_PATH}: ${e.message}`);
-    process.exit(1);
+/**
+ * Load and cache the GitHub token for a given channel. Each channel declares
+ * its own token_file in the config (mapped from a BW vault item at deploy
+ * time). Returns the token string or throws.
+ */
+function loadGithubTokenForChannel(channelCfg) {
+  const cid = channelCfg && channelCfg.id;
+  if (!cid) throw new Error('channelCfg has no id');
+  if (githubTokens.has(cid)) return githubTokens.get(cid);
+
+  const tokFile = channelCfg.github && channelCfg.github.token_file;
+  if (!tokFile) throw new Error(`channel ${cid} has no github.token_file configured`);
+
+  const stat = fs.statSync(tokFile);
+  // Refuse world-readable / group-readable token files (service runs as root).
+  if ((stat.mode & 0o077) !== 0) {
+    throw new Error(`token file ${tokFile} has permissive mode ${(stat.mode & 0o777).toString(8)} (need 600)`);
   }
+  const tok = fs.readFileSync(tokFile, 'utf8').trim();
+  if (!tok) throw new Error(`empty token file ${tokFile}`);
+  log(`github token loaded for channel ${channelCfg.name || cid} (${tok.length} chars from ${tokFile})`);
+  githubTokens.set(cid, tok);
+  return tok;
 }
 
 // --- Message Parsing -------------------------------------------------------
@@ -103,21 +120,24 @@ function loadGithubToken() {
 // Also accepts PR_READY and PR_COMMENT as synonymous triggers (advertised in
 // trigger_pattern docs and SETUP.md), and JUMO_TEST_REQUEST as a project-scoped
 // variant.
-const TRIGGER_PATTERN = /^(?:JUMO_)?(?:TEST_REQUEST|PR_READY|PR_COMMENT)\s+branch=(\S+)\s+pr=(\d+)(?:\s+repo=(\S+))?/i;
+// A test trigger is TEST_REQUEST/PR_READY (NOT *_COMMENT -> that goes to Nero).
+// Fields branch=/pr=/repo= are parsed order-independently (composite action
+// posts repo= pr= branch=; JUMO inline posts branch= pr=). MUST carry pr=+branch=.
+const TRIGGER_PATTERN = /^(?:JUMO_)?(?:TEST_REQUEST|PR_READY)\b/i;
 
 function parseTestRequest(content) {
-  const m = content.match(TRIGGER_PATTERN);
-  if (!m) return null;
-  // Normalise prefix to one of: TEST_REQUEST | JUMO_TEST_REQUEST.
-  // PR_READY / PR_COMMENT are accepted as trigger names but behave
-  // identically to TEST_REQUEST at the dispatcher level.
-  const fullMatch = m[0].match(/^(JUMO_)?(?:TEST_REQUEST|PR_READY|PR_COMMENT)/i);
-  const prefix = (fullMatch && fullMatch[1] ? 'JUMO_TEST_REQUEST' : 'TEST_REQUEST');
+  if (!TRIGGER_PATTERN.test(content)) return null;
+  if (/^(?:JUMO_)?(?:TEST_REQUEST|PR_READY)_COMMENT/i.test(content)) return null;
+  const prM = content.match(/\bpr=(\d+)/i);
+  const brM = content.match(/\bbranch=(\S+)/i);
+  const rpM = content.match(/\brepo=(\S+)/i);
+  if (!prM || !brM) return null;
+  const isJumo = /^JUMO_/i.test(content);
   return {
-    prefix,
-    branch: m[1],
-    pr: m[2],
-    repo: m[3] || null,  // null = use channel default
+    prefix: isJumo ? 'JUMO_TEST_REQUEST' : 'TEST_REQUEST',
+    branch: brM[1],
+    pr: prM[1],
+    repo: rpM ? rpM[1] : null,
   };
 }
 
@@ -156,17 +176,20 @@ function projectForRepo(repoFullName) {
     return null;
   }
   if (name === 'JUMO-Website-CMS') return 'jumo';
+  if (name === 'homeassistant-config') return 'ha';
   return name;  // for SkyTechNerds/ha-soft-presence etc.
 }
 
 function resolveProject(channelCfg, repoFullName) {
-  // Prefer the configured project name (authoritative). Fall back to
-  // repo-derived name only when the config genuinely lacks a project field.
+  // Shared channel: derive project from repo= in the message (authoritative).
+  // Per-repo channel: fall back to the configured project name.
+  const fromRepo = repoFullName ? projectForRepo(repoFullName) : null;
+  if (fromRepo) return fromRepo;
   if (channelCfg && typeof channelCfg.project === 'string'
       && /^[A-Za-z0-9._-]+$/.test(channelCfg.project)) {
     return channelCfg.project;
   }
-  return projectForRepo(repoFullName);
+  return null;
 }
 
 // --- Test Invocation -------------------------------------------------------
@@ -188,9 +211,13 @@ function runTest(repoFullName, pr, branch, project, mode = 'collect') {
   if (!fs.existsSync(realScript)) {
     throw new Error(`No test script at ${realScript}`);
   }
-  log(`running ${realScript} ${pr} ${branch} ${mode}`);
+  // JUMO wrapper expects <branch> <pr> dev; HA wrappers expect <pr> <branch> main.
+  const args = (project === 'jumo')
+    ? [realScript, branch, String(pr), 'dev', mode]
+    : [realScript, String(pr), branch, 'main', mode];
+  log(`running ${realScript} (${project}) ${args.slice(1).join(' ')}`);
   const env = { ...process.env, REPO: repoFullName, PATH: process.env.PATH };
-  const result = spawn('bash', [realScript, String(pr), branch, 'main', mode], {
+  const result = spawn('bash', args, {
     env,
     cwd: BOTS_DIR,
     timeout: 600_000,  // 10 min
@@ -210,14 +237,17 @@ function runTest(repoFullName, pr, branch, project, mode = 'collect') {
 // --- GitHub PR Comment Posting ---------------------------------------------
 
 /**
- * Post a comment to a GitHub PR. Resolves with {ok, status, body} so the
- * caller can react to GitHub-side failures instead of reporting success
- * to Discord when the PR comment never landed.
+ * Post a comment to a GitHub PR using the channel-specific token. Resolves
+ * with {ok, status, body} so the caller can react to GitHub-side failures
+ * instead of reporting success to Discord when the PR comment never landed.
  */
-async function postPRComment(repoFullName, pr, body) {
-  if (!githubToken) {
-    log('skipping PR comment: no github token');
-    return { ok: false, status: 0, body: 'no github token' };
+async function postPRComment(channelCfg, repoFullName, pr, body) {
+  let token;
+  try {
+    token = loadGithubTokenForChannel(channelCfg);
+  } catch (e) {
+    log(`skipping PR comment for ${repoFullName}#${pr}: ${e.message}`);
+    return { ok: false, status: 0, body: `token-load: ${e.message}` };
   }
   const url = `https://api.github.com/repos/${repoFullName}/issues/${pr}/comments`;
   const payload = JSON.stringify({ body });
@@ -225,7 +255,7 @@ async function postPRComment(repoFullName, pr, body) {
     const proc = spawn('curl', [
       '-sS', '-w', '\n__HTTP_STATUS__:%{http_code}',
       '-X', 'POST', url,
-      '-H', `Authorization: token ${githubToken}`,
+      '-H', `Authorization: token ${token}`,
       '-H', 'Content-Type: application/json',
       '-H', 'User-Agent: hermes-discord-listener',
       '-d', payload,
@@ -245,7 +275,7 @@ async function postPRComment(repoFullName, pr, body) {
         log(`PR comment HTTP ${status}: ${bodyOnly.slice(0, 200)}`);
         return resolve({ ok: false, status, body: bodyOnly });
       }
-      log(`PR comment OK (HTTP ${status})`);
+      log(`PR comment OK (HTTP ${status}) for ${repoFullName}#${pr}`);
       resolve({ ok: true, status, body: bodyOnly });
     });
   });
@@ -254,10 +284,18 @@ async function postPRComment(repoFullName, pr, body) {
 // --- Main Handler ----------------------------------------------------------
 
 async function handleTestRequest(message, channelCfg, parsed) {
-  // channelCfg is AUTHORITATIVE: ignore parsed.repo (could be attacker-
-  // controlled via Discord message). Always use the repo bound to the channel.
-  const repo = channelCfg && channelCfg.repo;
   const { pr, branch, prefix } = parsed;
+  // Per-repo channel: repo is bound to the channel. Shared channel: repo comes
+  // from the (trusted-webhook) message, whitelisted via allowed_repos so a
+  // spoofed Discord message cannot run an arbitrary repo.
+  let repo = channelCfg && channelCfg.repo;
+  if (channelCfg && channelCfg.shared) {
+    repo = parsed.repo || repo;
+    const allow = Array.isArray(channelCfg.allowed_repos) ? channelCfg.allowed_repos : [];
+    if (!repo || (allow.length && !allow.includes(repo))) {
+      return;  // not the listener's repo (e.g. JUMO) -> Nero handles it
+    }
+  }
 
   // Prefix must match what this channel declares. e.g. a TEST_REQUEST in the
   // JUMO channel (which expects JUMO_TEST_REQUEST) must be rejected so users
@@ -265,9 +303,11 @@ async function handleTestRequest(message, channelCfg, parsed) {
   if (!channelCfg || !repo) {
     return message.reply('❌ Channel not configured for test runs.');
   }
-  const expectedPrefix = channelCfg.trigger_prefix || 'TEST_REQUEST';
-  if (prefix !== expectedPrefix) {
-    return message.reply(`❌ Wrong trigger for this channel: expected ${expectedPrefix}, got ${prefix}.`);
+  if (!channelCfg.shared) {
+    const expectedPrefix = channelCfg.trigger_prefix || 'TEST_REQUEST';
+    if (prefix !== expectedPrefix) {
+      return message.reply(`❌ Wrong trigger for this channel: expected ${expectedPrefix}, got ${prefix}.`);
+    }
   }
 
   // Validate inputs BEFORE passing them to a shell-spawning script.
@@ -289,18 +329,10 @@ async function handleTestRequest(message, channelCfg, parsed) {
 
   try {
     const { stdout } = await runTest(repo, pr, branch, project);
-    const reportMatch = stdout.match(/## (PASS|FAIL|WARN).*$/ms);
-    const report = reportMatch ? reportMatch[0] : stdout.slice(-2000);
-
-    // Post report as PR comment — propagate failure to the Discord ack so we
-    // don't claim success when GitHub returned 401/422/etc.
-    const gh = await postPRComment(repo, pr, report);
-    if (gh.ok) {
-      await ack.edit(`✅ Tests done for ${repo}#${pr} — report posted (HTTP ${gh.status})`);
-    } else {
-      await ack.edit(`⚠️ Tests ran for ${repo}#${pr}, but PR comment FAILED (HTTP ${gh.status}): ${gh.body.slice(0, 200)}`);
-    }
-    log(`done ${repo}#${pr} (gh=${gh.status})`);
+    // The project test-pr.sh self-posts the PR comment AND self-resolves its
+    // own GitHub token (load-token.sh). The listener does NOT post again.
+    log(`done ${repo}#${pr}: ${stdout.slice(-160)}`);
+    await ack.edit(`✅ Tests done for ${repo}#${pr} — Report auf dem PR gepostet`);
   } catch (e) {
     await ack.edit(`❌ Test failed: ${e.message.slice(0, 500)}`);
     log(`FAIL ${repo}#${pr}: ${e.message}`);
@@ -324,7 +356,7 @@ client.once(Events.ClientReady, c => {
 
 client.on(Events.MessageCreate, async message => {
   // Ignore self + bots
-  if (message.author.bot) return;
+  if (message.author.bot && !message.webhookId) return;  // allow webhook triggers; skip real bots/self
 
   const channelCfg = channels.get(message.channelId);
   if (!channelCfg) return;  // not a watched channel
@@ -366,7 +398,6 @@ client.on(Events.Error, err => log(`client error: ${err.message}`));
 // --- Startup ---------------------------------------------------------------
 
 loadDiscordToken();
-loadGithubToken();
 log('connecting to Discord...');
 client.login(discordToken);
 
