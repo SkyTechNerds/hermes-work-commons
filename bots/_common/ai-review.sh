@@ -12,7 +12,18 @@ DIFF="$("$DIR/pr-diff.sh" "$REPO" "$PR" 2>/dev/null | head -c 14000)"
 [ -z "$DIFF" ] && { echo "ai-review: kein Diff"; exit 0; }
 
 case "$REPO" in
-  *JUMO*) CRIT="AEM EDS: fehlendes moveInstrumentation; Framework-Imports (React/Vue/jQuery); Imports ohne .js-Endung; img.src statt responsive Images; outline:none; hardcodierte Farben statt var(--); CSS-Nesting>3; Animationen auf Layout-Properties statt transform/opacity; Touch-Targets<44px." ;;
+  *JUMO*)
+    # AEM-Regelwerk live aus dem Team-Wiki (Axiom-SMB) holen — Claude reviewt gegen die echten Projekt-Standards.
+    AEM_RULES="$("$DIR/wiki-get.sh" concepts/role-aem-frontend.md; printf '\n\n'; "$DIR/wiki-get.sh" concepts/aem-blocks.md; printf '\n\n'; "$DIR/wiki-get.sh" concepts/aem-block-validator.md)"
+    if [ "${#AEM_RULES}" -gt 500 ]; then
+      CRIT="AEM Edge Delivery Services. Pruefe den Diff gegen DIESES Projekt-Regelwerk aus dem Team-Wiki (alle als PFLICHT markierten Regeln gelten):
+
+$AEM_RULES"
+    else
+      # Fallback wenn Wiki nicht erreichbar
+      CRIT="AEM EDS: fehlendes moveInstrumentation; Framework-Imports (React/Vue/jQuery); Imports ohne .js-Endung; img.src statt responsive Images; outline:none; hardcodierte Farben statt var(--); CSS-Nesting>3; Animationen auf Layout-Properties statt transform/opacity; Touch-Targets<44px."
+    fi
+    ;;
   *homeassistant-config*) CRIT="Home-Assistant-YAML/Automationen: Logik-Bugs (z.B. repeat-Loop mit fixem delay reagiert nicht sofort auf Zustandswechsel; Race-Conditions; fehlende stop/Bedingungen; falscher Modus single/restart/queued); native Trigger/Conditions statt Jinja; entity_id statt device_id; Helfer statt Template-Sensoren; Klartext-Secrets." ;;
   *ha-soft-presence*) CRIT="HA-Python-Integration: Blocking-Calls im async-Event-Loop; fehlendes async/await; config_flow-Konventionen; manifest.json-Pflichtfelder; Typing; Exception-Handling; Entity-Konventionen (unique_id, device_info)." ;;
   *) CRIT="Allgemeine Korrektheit, Bugs, Sicherheit." ;;
