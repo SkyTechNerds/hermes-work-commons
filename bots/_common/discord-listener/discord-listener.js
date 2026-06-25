@@ -333,6 +333,21 @@ async function handleTestRequest(message, channelCfg, parsed) {
     // own GitHub token (load-token.sh). The listener does NOT post again.
     log(`done ${repo}#${pr}: ${stdout.slice(-160)}`);
     await ack.edit(`✅ Tests done for ${repo}#${pr} — Report auf dem PR gepostet`);
+    // Claude-Logik-Review (separat, $0 via claude -p) — postet Inline-Findings
+    try {
+      const out = await new Promise((res) => {
+        const p = spawn('bash', [path.join(BOTS_DIR, '_common', 'ai-review.sh'), repo, String(pr)], { timeout: 180000 });
+        let o = '';
+        p.stdout.on('data', (d) => { o += d; });
+        p.stderr.on('data', (d) => { o += d; });
+        p.on('close', () => res(o));
+        p.on('error', () => res(''));
+      });
+      const fm = out.match(/AI-REVIEW: (\d+)/);
+      const nf = fm ? fm[1] : '0';
+      log(`ai-review ${repo}#${pr}: ${nf} findings`);
+      if (nf !== '0') await ack.edit(`✅ ${repo}#${pr} — Tests + Review (${nf} Hinweise) gepostet`);
+    } catch (e) { log(`ai-review error ${repo}#${pr}: ${e.message}`); }
   } catch (e) {
     await ack.edit(`❌ Test failed: ${e.message.slice(0, 500)}`);
     log(`FAIL ${repo}#${pr}: ${e.message}`);
