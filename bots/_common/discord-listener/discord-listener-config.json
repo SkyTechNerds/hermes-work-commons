@@ -1,7 +1,14 @@
 {
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Channel-Repo-Mapping fuer hermes-work Discord-Listener",
   "channels": [
+    {
+      "id": "1483798451786350741",
+      "name": "qa-department",
+      "repo": "JUMO-GmbH-Co-KG/JUMO-Website-CMS",
+      "project": "jumo",
+      "trigger_prefix": "JUMO_TEST_REQUEST"
+    },
     {
       "id": "1518915764478935170",
       "name": "ha-qa",
@@ -16,14 +23,5 @@
       "project": "ha-soft-presence",
       "trigger_prefix": "TEST_REQUEST"
     }
-  ],
-  "jumo_pending": {
-    "note": "JUMO-Channel (qa-department) hat Reviewer-Check im Workflow, ueberspringt PRs ohne passenden Reviewer. Listener reagiert nur auf Messages die durchkommen. Channel-ID muss noch ergaenzt werden.",
-    "channel": {
-      "name": "qa-department",
-      "repo": "JUMO-GmbH-Co-KG/JUMO-Website-CMS",
-      "project": "jumo",
-      "trigger_prefix": "JUMO_TEST_REQUEST"
-    }
-  }
+  ]
 }
