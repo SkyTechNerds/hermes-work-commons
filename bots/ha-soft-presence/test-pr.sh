@@ -143,35 +143,7 @@ fi
 echo ']}' >> "$RESULTS_JSON"
 
 # === Report generieren ===
-python3 - "$RESULTS_JSON" "$PR" "$BRANCH" "$BASE" "$HEAD_SHA" <<'PYEOF'
-import json, sys
-results_file, pr, branch, base, head_sha = sys.argv[1:6]
-with open(results_file) as f:
-    data = json.load(f)
-icon = {"pass": "✅", "fail": "❌", "warn": "⚠️"}
-shown = [c for c in data["checks"] if c["status"] != "skip"]
-has_fail = any(c["status"] == "fail" for c in shown)
-has_warn = any(c["status"] == "warn" for c in shown)
-head = "✅" if not has_fail else "❌"
-lines = [f"## {head} Automatischer PR-Test — ha-soft-presence (PR #{pr})", ""]
-for c in shown:
-    lines.append(f"- {icon.get(c['status'], '•')} **{c['name']}** — {c['message']}")
-if not shown:
-    lines.append("_Keine pruefbaren Aenderungen in diesem PR._")
-lines.append("")
-if not has_fail and not has_warn:
-    lines.append("**Alle Pruefungen bestanden.**")
-elif not has_fail:
-    lines.append("**Bestanden — mit Hinweisen (siehe ⚠️).**")
-else:
-    lines.append("**Fehlgeschlagen — bitte korrigieren.**")
-lines.append("")
-lines.append(f"_Branch `{branch}` → `{base}` · Commit `{head_sha[:7]}`_")
-out = "\n".join(lines)
-with open(f"/tmp/ha-soft-presence-report-{pr}.md", "w") as f:
-    f.write(out)
-print(out)
-PYEOF
+python3 "$SCRIPT_DIR/../_common/render-report.py" "$RESULTS_JSON" "$BRANCH" "$BASE" /tmp/ha-soft-presence-report-${PR}.md
 
 # === PR-Kommentar posten ===
 COMMENT_BODY=$(jq -Rs '{body: .}' < /tmp/ha-soft-presence-report-${PR}.md)
