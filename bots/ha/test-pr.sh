@@ -115,5 +115,5 @@ fi
 
 echo ']}' >> "$RESULTS_JSON"
 
-python3 /opt/ha-testing/render-report.py "$RESULTS_JSON" "$PR" "$BRANCH" "$BASE"
+python3 "$SCRIPT_DIR/../_common/render-report.py" "$RESULTS_JSON" "$BRANCH" "$BASE" /tmp/ha-report-${PR}.md
 python3 /opt/ha-testing/post-comment.py "$PR" /tmp/ha-report-${PR}.md
