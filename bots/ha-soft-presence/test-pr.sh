@@ -148,14 +148,25 @@ import json, sys
 results_file, pr, branch, base, head_sha = sys.argv[1:6]
 with open(results_file) as f:
     data = json.load(f)
-icon = {"pass": "PASS", "fail": "FAIL", "warn": "WARN", "skip": "SKIP"}
-status_overall = "PASS" if all(c["status"] != "fail" for c in data["checks"]) else "FAIL"
-lines = [f"## {status_overall} ha-soft-presence PR-Test (PR #{pr})", ""]
-for c in data["checks"]:
-    lines.append(f"- [{icon.get(c['status'], '?')}] **{c['name']}** -- {c['message']}")
+icon = {"pass": "✅", "fail": "❌", "warn": "⚠️"}
+shown = [c for c in data["checks"] if c["status"] != "skip"]
+has_fail = any(c["status"] == "fail" for c in shown)
+has_warn = any(c["status"] == "warn" for c in shown)
+head = "✅" if not has_fail else "❌"
+lines = [f"## {head} Automatischer PR-Test — ha-soft-presence (PR #{pr})", ""]
+for c in shown:
+    lines.append(f"- {icon.get(c['status'], '•')} **{c['name']}** — {c['message']}")
+if not shown:
+    lines.append("_Keine pruefbaren Aenderungen in diesem PR._")
 lines.append("")
-lines.append(f"_Branch: `{branch}` -> `{base}`_")
-lines.append(f"_Commit: `{head_sha[:7]}`_")
+if not has_fail and not has_warn:
+    lines.append("**Alle Pruefungen bestanden.**")
+elif not has_fail:
+    lines.append("**Bestanden — mit Hinweisen (siehe ⚠️).**")
+else:
+    lines.append("**Fehlgeschlagen — bitte korrigieren.**")
+lines.append("")
+lines.append(f"_Branch `{branch}` → `{base}` · Commit `{head_sha[:7]}`_")
 out = "\n".join(lines)
 with open(f"/tmp/ha-soft-presence-report-{pr}.md", "w") as f:
     f.write(out)
