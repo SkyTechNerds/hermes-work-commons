@@ -1,0 +1,27 @@
+{
+  "version": "1.1.0",
+  "description": "Channel-Repo-Mapping fuer hermes-work Discord-Listener",
+  "channels": [
+    {
+      "id": "1483798451786350741",
+      "name": "qa-department",
+      "repo": "JUMO-GmbH-Co-KG/JUMO-Website-CMS",
+      "project": "jumo",
+      "trigger_prefix": "JUMO_TEST_REQUEST"
+    },
+    {
+      "id": "1518915764478935170",
+      "name": "ha-qa",
+      "repo": "SkyTechNerds/homeassistant-config",
+      "project": "ha",
+      "trigger_prefix": "TEST_REQUEST"
+    },
+    {
+      "id": "1519227518467575859",
+      "name": "ha-soft-presence",
+      "repo": "SkyTechNerds/ha-soft-presence",
+      "project": "ha-soft-presence",
+      "trigger_prefix": "TEST_REQUEST"
+    }
+  ]
+}

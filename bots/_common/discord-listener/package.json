@@ -1,0 +1,15 @@
+{
+  "name": "discord-listener",
+  "version": "1.0.0",
+  "description": "Hermes-Work Discord-Listener: pollt Channel, triggert bots/<project>/test-pr.sh, postet Reports",
+  "main": "discord-listener.js",
+  "scripts": {
+    "start": "node discord-listener.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.26.4"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
