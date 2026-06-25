@@ -2,9 +2,8 @@ name: 'Notify Discord (Hermes-Work)'
 
 description: >
   Sendet eine Webhook-Message nach Discord wenn ein PR geöffnet/aktualisiert
-  wird oder ein Kommentar gepostet wird. Macht KEINE Tests selbst.
-  Der Hermes-Bot (auf unserem Server) reagiert auf die Discord-Message
-  und führt die projektspezifischen Tests aus.
+  wird oder ein Kommentar gepostet wird (inkl. Replies auf Inline-Review-Kommentare).
+  Macht KEINE Tests selbst. Der Hermes-Bot reagiert auf die Discord-Message.
 
 inputs:
   discord_webhook_url:
@@ -15,72 +14,17 @@ inputs:
     description: 'Footer-Prefix für die Bot-Trigger-Erkennung. Default PR_READY, JUMO nutzt JUMO_TEST_REQUEST.'
     required: false
     default: 'PR_READY'
-  reviewer_gate:
-    description: >
-      'true' = bei pull_request-Events nur posten wenn KEIN Reviewer gesetzt ist
-      ODER einer aus gate_reviewers eingetragen ist. Default 'false' (immer posten).
-      Caller braucht dafür permissions: pull-requests: read.
-    required: false
-    default: 'false'
-  gate_reviewers:
-    description: 'Komma-Liste erlaubter Reviewer-Logins (case-insensitive), wenn reviewer_gate=true.'
-    required: false
-    default: 'jimknopf90,schimanski-antegma'
 
 runs:
   using: composite
   steps:
-    - name: Reviewer gate
-      id: gate
-      env:
-        REVIEWER_GATE: ${{ inputs.reviewer_gate }}
-        GATE_REVIEWERS: ${{ inputs.gate_reviewers }}
-        EVENT_NAME: ${{ github.event_name }}
-        REPO_FULL: ${{ github.repository }}
-        PR_NUMBER: ${{ github.event.number }}
-        GH_TOKEN: ${{ github.token }}
-      shell: bash
-      run: |
-        # Gate gilt nur für pull_request-Events; Kommentare immer durchlassen.
-        if [ "$REVIEWER_GATE" != "true" ] || [ "$EVENT_NAME" != "pull_request" ]; then
-          echo "proceed=true" >> "$GITHUB_OUTPUT"
-          exit 0
-        fi
-
-        REVIEWERS=$(gh api "repos/${REPO_FULL}/pulls/${PR_NUMBER}/requested_reviewers" \
-          --jq '[.users[].login] | map(ascii_downcase) | join(",")' 2>/dev/null) || REVIEWERS="__API_ERROR__"
-        echo "Reviewers: $REVIEWERS"
-
-        if [ "$REVIEWERS" = "__API_ERROR__" ]; then
-          # Fail-open: lieber benachrichtigen als still schlucken (z.B. fehlende permissions).
-          echo "::warning::requested_reviewers nicht lesbar (permissions: pull-requests: read fehlt?) — Gate übersprungen, poste trotzdem."
-          echo "proceed=true" >> "$GITHUB_OUTPUT"
-          exit 0
-        fi
-
-        PROCEED=false
-        if [ -z "$REVIEWERS" ]; then
-          PROCEED=true
-        else
-          IFS=',' read -ra ALLOW <<< "$GATE_REVIEWERS"
-          for r in "${ALLOW[@]}"; do
-            r_lc=$(echo "$r" | tr '[:upper:]' '[:lower:]' | xargs)
-            if echo "$REVIEWERS" | grep -qi "\b${r_lc}\b"; then PROCEED=true; break; fi
-          done
-        fi
-        if [ "$PROCEED" != "true" ]; then
-          echo "Kein passender Reviewer ($REVIEWERS) — überspringe Notification."
-        fi
-        echo "proceed=$PROCEED" >> "$GITHUB_OUTPUT"
-
     - name: Build & post Discord notification
-      if: steps.gate.outputs.proceed == 'true'
       env:
         DISCORD_WEBHOOK_URL: ${{ inputs.discord_webhook_url }}
         TRIGGER_PREFIX: ${{ inputs.trigger_prefix }}
         EVENT_NAME: ${{ github.event_name }}
         REPO_FULL: ${{ github.repository }}
-        PR_NUMBER: ${{ github.event.number }}
+        PR_NUMBER: ${{ github.event.number || github.event.pull_request.number }}
         PR_TITLE: ${{ github.event.pull_request.title }}
         PR_SENDER: ${{ github.event.sender.login }}
         PR_HEAD: ${{ github.head_ref }}
@@ -89,6 +33,9 @@ runs:
         PR_URL: ${{ github.event.pull_request.html_url }}
         COMMENT_BODY: ${{ github.event.comment.body }}
         COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
+        COMMENT_ID: ${{ github.event.comment.id }}
+        COMMENT_PATH: ${{ github.event.comment.path }}
+        IN_REPLY_TO: ${{ github.event.comment.in_reply_to_id }}
       shell: bash
       run: |
         if [ -z "$DISCORD_WEBHOOK_URL" ]; then
@@ -98,11 +45,8 @@ runs:
 
         case "$EVENT_NAME" in
           pull_request)
-            # PR-Open/Synchronize: sage Discord Bescheid, dass ein PR offen/aktualisiert wurde
-            # Hermes-Bot greift das auf, resolved Repo → führt Tests aus
             CONTENT="${TRIGGER_PREFIX} repo=${REPO_FULL} pr=${PR_NUMBER} branch=${PR_HEAD}"
             PAYLOAD=$(jq -n \
-              --arg content "$CONTENT" \
               --arg pr "#${PR_NUMBER}" \
               --arg title "$PR_TITLE" \
               --arg merge "${PR_HEAD} → ${PR_BASE}" \
@@ -132,7 +76,7 @@ runs:
             ;;
 
           issue_comment)
-            # Kommentar auf PR
+            CONTENT="${TRIGGER_PREFIX}_COMMENT repo=${REPO_FULL} pr=${PR_NUMBER}"
             PAYLOAD=$(jq -n \
               --arg repo "$REPO_FULL" \
               --arg prnum "$PR_NUMBER" \
@@ -153,7 +97,37 @@ runs:
                   "footer": { "text": ($trigger + "_COMMENT repo=" + $repo + " pr=" + $prnum) }
                 }]
               }')
-            CONTENT="${TRIGGER_PREFIX}_COMMENT repo=${REPO_FULL} pr=${PR_NUMBER}"
+            ;;
+
+          pull_request_review_comment)
+            # Nur ECHTE Replies weiterleiten (in_reply_to_id gesetzt) — NICHT die initialen
+            # Inline-Findings (kein in_reply_to_id), sonst triggert jedes eigene Finding sich selbst.
+            if [ -z "$IN_REPLY_TO" ] || [ "$IN_REPLY_TO" = "null" ]; then
+              echo "::notice::Inline-Finding (kein Reply) — kein Webhook"
+              exit 0
+            fi
+            CONTENT="${TRIGGER_PREFIX}_REVIEW_REPLY repo=${REPO_FULL} pr=${PR_NUMBER} comment=${COMMENT_ID}"
+            PAYLOAD=$(jq -n \
+              --arg repo "$REPO_FULL" \
+              --arg prnum "$PR_NUMBER" \
+              --arg author "$COMMENT_AUTHOR" \
+              --arg body "$COMMENT_BODY" \
+              --arg path "$COMMENT_PATH" \
+              --arg cid "$COMMENT_ID" \
+              --arg trigger "$TRIGGER_PREFIX" \
+              '{
+                "content": ($trigger + "_REVIEW_REPLY repo=" + $repo + " pr=" + $prnum + " comment=" + $cid),
+                "embeds": [{
+                  "title": ("↩️ Reply auf Review-Kommentar (PR #" + $prnum + ")"),
+                  "color": 10181046,
+                  "fields": [
+                    { "name": "Author", "value": $author, "inline": true },
+                    { "name": "Datei", "value": $path, "inline": true },
+                    { "name": "Text", "value": ($body[0:500]), "inline": false }
+                  ],
+                  "footer": { "text": ($trigger + "_REVIEW_REPLY repo=" + $repo + " pr=" + $prnum + " comment=" + $cid) }
+                }]
+              }')
             ;;
 
           *)
