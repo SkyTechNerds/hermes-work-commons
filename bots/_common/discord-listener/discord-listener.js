@@ -281,6 +281,37 @@ async function postPRComment(channelCfg, repoFullName, pr, body) {
   });
 }
 
+// --- PR State Gate ---------------------------------------------------------
+
+// Liefert 'open' | 'closed' | 'merged' | null (null = API-Fehler -> fail-open).
+async function prState(channelCfg, repoFullName, pr) {
+  let token;
+  try {
+    token = loadGithubTokenForChannel(channelCfg);
+  } catch (e) {
+    log(`prState: kein Token für ${repoFullName}: ${e.message}`);
+    return null;
+  }
+  const url = `https://api.github.com/repos/${repoFullName}/pulls/${pr}`;
+  return new Promise((resolve) => {
+    const proc = spawn('curl', [
+      '-sS', '-H', `Authorization: token ${token}`,
+      '-H', 'User-Agent: hermes-discord-listener',
+      '-H', 'Accept: application/vnd.github+json', url,
+    ]);
+    let out = '';
+    proc.stdout.on('data', d => out += d);
+    proc.on('close', () => {
+      try {
+        const j = JSON.parse(out);
+        if (j.merged === true) return resolve('merged');
+        return resolve(j.state || null);
+      } catch { resolve(null); }
+    });
+    proc.on('error', () => resolve(null));
+  });
+}
+
 // --- Main Handler ----------------------------------------------------------
 
 async function handleTestRequest(message, channelCfg, parsed) {
@@ -321,6 +352,14 @@ async function handleTestRequest(message, channelCfg, parsed) {
   const project = resolveProject(channelCfg, repo);
   if (!project) {
     return message.reply(`❌ Cannot resolve project for ${repo}.`);
+  }
+
+  // Gate: nur OFFENE PRs testen/reviewen. Merged/closed PRs (oder Kommentar-
+  // Trigger darauf) still überspringen — kein Ack, kein Test, kein Review.
+  const state = await prState(channelCfg, repo, pr);
+  if (state && state !== 'open') {
+    log(`skip ${repo}#${pr}: PR ist ${state} (nicht offen) — kein Test/Review`);
+    return;
   }
 
   // Acknowledge in Discord
