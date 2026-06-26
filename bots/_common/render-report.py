@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Gemeinsamer Report-Renderer fuer ALLE hermes-work Test-Bots.
+"""Gemeinsamer Report-Renderer für ALLE hermes-work Test-Bots.
 
 Erzeugt das einheitliche hermes-work-Report-Format (Vorlage = JUMO run.js).
 So sieht jeder Bot-Report identisch aus — neue Tests muessen NICHTS neu bauen.
@@ -17,7 +17,7 @@ Format (identisch zu JUMO):
   ⚠️ **Name** — Detail      (warn)
   ❌ **Name** — Detail      (fail)
   ⚪ **Name** — ⏭️ Detail   (skip)
-  ---  + ### <Name>\\n<Detail>  fuer Fails / mehrzeilige Details
+  ---  + ### <Name>\\n<Detail>  für Fails / mehrzeilige Details
   <sub>hermes-work · branch `x` · base `y`</sub>
 """
 import json

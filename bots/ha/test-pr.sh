@@ -67,7 +67,7 @@ if [ -z "$SECRET_HITS" ]; then
   add_check "secret-scan" "pass" "Keine Klartext-Secrets im Diff"
 else
   N=$(echo "$SECRET_HITS" | wc -l)
-  add_check "secret-scan" "fail" "$N moegliche Klartext-Secrets"
+  add_check "secret-scan" "fail" "$N mögliche Klartext-Secrets"
   echo "$SECRET_HITS" > /tmp/ha-secrets-${PR}.txt
 fi
 
@@ -110,7 +110,7 @@ if [ -n "$INCLUDE_REFS" ]; then
     add_check "includes" "pass" "Alle include-Referenzen aufloesbar"
   fi
 else
-  add_check "includes" "skip" "Keine include-Aenderungen im Diff"
+  add_check "includes" "skip" "Keine include-Änderungen im Diff"
 fi
 
 echo ']}' >> "$RESULTS_JSON"

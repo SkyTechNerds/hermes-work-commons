@@ -1,5 +1,5 @@
 #!/bin/bash
-# hermes-work -- HA-Custom-Component PR-Test Runner fuer ha-soft-presence.
+# hermes-work -- HA-Custom-Component PR-Test Runner für ha-soft-presence.
 # Usage: test-pr.sh <pr> <branch> [base=main] [mode=collect]
 set -uo pipefail
 
@@ -126,7 +126,7 @@ if [ -z "$SECRET_HITS" ]; then
   add_check "secret-scan" "pass" "Keine Klartext-Secrets im Diff"
 else
   N=$(echo "$SECRET_HITS" | wc -l)
-  add_check "secret-scan" "fail" "$N moegliche Klartext-Secrets"
+  add_check "secret-scan" "fail" "$N mögliche Klartext-Secrets"
   echo "$SECRET_HITS" > /tmp/ha-soft-presence-secrets-${PR}.txt
 fi
 

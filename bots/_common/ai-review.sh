@@ -1,7 +1,7 @@
 #!/bin/bash
-# hermes-work — Claude-Logik-Review (ALLE Repos), $0 ueber `claude -p` (Max-Abo).
-# Holt den PR-Diff -> laesst Claude reviewen -> postet zeilengenaue Inline-Kommentare.
-# Laeuft separat vom Hermes-Agenten (MiniMax) -> zuverlaessig + CodeRabbit-Niveau.
+# hermes-work — Claude-Logik-Review (ALLE Repos), $0 über `claude -p` (Max-Abo).
+# Holt den PR-Diff -> lässt Claude reviewen -> postet zeilengenaue Inline-Kommentare.
+# Läuft separat vom Hermes-Agenten (MiniMax) -> zuverlässig + CodeRabbit-Niveau.
 # Usage: ai-review.sh <owner/repo> <pr>
 set -uo pipefail
 [ "$#" -lt 2 ] && { echo "usage: ai-review.sh <owner/repo> <pr>" >&2; exit 2; }
@@ -16,7 +16,7 @@ case "$REPO" in
     # AEM-Regelwerk live aus dem Team-Wiki (Axiom-SMB) holen — Claude reviewt gegen die echten Projekt-Standards.
     AEM_RULES="$("$DIR/wiki-get.sh" concepts/role-aem-frontend.md; printf '\n\n'; "$DIR/wiki-get.sh" concepts/aem-blocks.md; printf '\n\n'; "$DIR/wiki-get.sh" concepts/aem-block-validator.md)"
     if [ "${#AEM_RULES}" -gt 500 ]; then
-      CRIT="AEM Edge Delivery Services. Pruefe den Diff gegen DIESES Projekt-Regelwerk aus dem Team-Wiki (alle als PFLICHT markierten Regeln gelten):
+      CRIT="AEM Edge Delivery Services. Prüfe den Diff gegen DIESES Projekt-Regelwerk aus dem Team-Wiki (alle als PFLICHT markierten Regeln gelten):
 
 $AEM_RULES"
     else
@@ -29,11 +29,13 @@ $AEM_RULES"
   *) CRIT="Allgemeine Korrektheit, Bugs, Sicherheit." ;;
 esac
 
-PROMPT="Du bist ein praeziser, knapper Code-Reviewer. Pruefe NUR den folgenden PR-Diff auf konkrete Probleme nach diesen Kriterien:
+PROMPT="Du bist ein präziser, knapper Code-Reviewer. Prüfe NUR den folgenden PR-Diff auf konkrete Probleme nach diesen Kriterien:
 $CRIT
 
-Antworte AUSSCHLIESSLICH mit einem JSON-Array (keine Erklaerung, kein Markdown, keine Code-Fences). Format:
-[{\"file\":\"<pfad>\",\"line\":<zeilennummer im NEUEN Code>,\"severity\":\"major|minor\",\"message\":\"<konkrete Begruendung + kurzer Fix, professionell, deutsch>\"}]
+WICHTIG zur Sprache: Schreibe das message-Feld in korrektem Deutsch mit ECHTEN Umlauten (ä, ö, ü, ß). NIEMALS ASCII-Ersatz wie ae/oe/ue/ss verwenden — also 'fehleranfällig', nicht 'fehleranfaellig'.
+
+Antworte AUSSCHLIESSLICH mit einem JSON-Array (keine Erklärung, kein Markdown, keine Code-Fences). Format:
+[{\"file\":\"<pfad>\",\"line\":<zeilennummer im NEUEN Code>,\"severity\":\"major|minor\",\"message\":\"<konkrete Begründung + kurzer Fix, professionell, deutsch mit Umlauten>\"}]
 Zeilennummern aus den @@ -a,b +c,d @@-Hunks (rechte/neue Seite). Nur echte Findings, die WIRKLICH im Diff stehen. Wenn nichts Konkretes: []
 
 DIFF:
