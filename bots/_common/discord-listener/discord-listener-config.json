@@ -1,29 +1,20 @@
 {
-  "version": "1.0.0",
-  "description": "Channel-Repo-Mapping fuer hermes-work Discord-Listener",
+  "version": "1.3.0+shared",
+  "description": "Channel-Repo-Mapping für hermes-work Discord-Listener (Shared #jumo, alle Repos)",
   "channels": [
     {
-      "id": "1518915764478935170",
-      "name": "ha-qa",
-      "repo": "SkyTechNerds/homeassistant-config",
-      "project": "ha",
-      "trigger_prefix": "TEST_REQUEST"
-    },
-    {
-      "id": "1519227518467575859",
-      "name": "ha-soft-presence",
-      "repo": "SkyTechNerds/ha-soft-presence",
-      "project": "ha-soft-presence",
-      "trigger_prefix": "TEST_REQUEST"
+      "id": "1483798451786350741",
+      "name": "jumo",
+      "trigger_prefix": "JUMO_TEST_REQUEST",
+      "github": {
+        "token_file": "/etc/hermes-discord-listener/jumo.token"
+      },
+      "shared": true,
+      "allowed_repos": [
+        "JUMO-GmbH-Co-KG/JUMO-Website-CMS",
+        "SkyTechNerds/homeassistant-config",
+        "SkyTechNerds/ha-soft-presence"
+      ]
     }
-  ],
-  "jumo_pending": {
-    "note": "JUMO-Channel (qa-department) hat Reviewer-Check im Workflow, ueberspringt PRs ohne passenden Reviewer. Listener reagiert nur auf Messages die durchkommen. Channel-ID muss noch ergaenzt werden.",
-    "channel": {
-      "name": "qa-department",
-      "repo": "JUMO-GmbH-Co-KG/JUMO-Website-CMS",
-      "project": "jumo",
-      "trigger_prefix": "JUMO_TEST_REQUEST"
-    }
-  }
+  ]
 }
