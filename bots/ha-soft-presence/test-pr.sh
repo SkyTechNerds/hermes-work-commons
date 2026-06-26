@@ -38,6 +38,9 @@ PSOURCE="$(printf '%s' "$RESOLVE" | python3 -c 'import sys,json;print(json.load(
 if [ "$PSOURCE" = "auto" ]; then SRCTXT="automatisch erkannt"; else SRCTXT="aus \`$PSOURCE\`"; fi
 export CODEMOLE_PROFILE_LINE="Profil: \`$PROFILE\` · $SRCTXT · [⚙ Konfigurierbar](https://web.skycryer.com/codemole/docs/#config)"
 
+# ignore-Globs auf die Datei-Liste anwenden (Datei-basierte Checks: yamllint, includes)
+DIFF_FILES="$(printf '%s\n' "$DIFF_FILES" | RESOLVE="$RESOLVE" python3 "$SCRIPT_DIR/../_common/path-ignored.py")"
+
 RESULTS_JSON=/tmp/ha-soft-presence-test-${PR}.json
 echo '{"checks":[' > "$RESULTS_JSON"
 FIRST=1
