@@ -31,6 +31,13 @@ if [ -z "$DIFF_FILES" ]; then
   exit 0
 fi
 
+# --- Profil-Resolver (.codemole.yml -> Marker-Erkennung -> Default) ---
+RESOLVE="$(python3 "$SCRIPT_DIR/../_common/resolve-profile.py" "$REPO_DIR" "$REPO" 2>/dev/null)"
+PROFILE="$(printf '%s' "$RESOLVE" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("profile","ha-component"))' 2>/dev/null || echo ha-component)"
+PSOURCE="$(printf '%s' "$RESOLVE" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("source","auto"))' 2>/dev/null || echo auto)"
+if [ "$PSOURCE" = "auto" ]; then SRCTXT="automatisch erkannt"; else SRCTXT="aus \`$PSOURCE\`"; fi
+export CODEMOLE_PROFILE_LINE="Profil: \`$PROFILE\` · $SRCTXT · [⚙ Konfigurierbar](https://web.skycryer.com/codemole/docs/#config)"
+
 RESULTS_JSON=/tmp/ha-soft-presence-test-${PR}.json
 echo '{"checks":[' > "$RESULTS_JSON"
 FIRST=1
@@ -141,6 +148,25 @@ else
 fi
 
 echo ']}' >> "$RESULTS_JSON"
+
+# Checks filtern: explizit Disabled raus; bei explizitem `checks:` nur diese (Allowlist).
+if [ -n "$RESOLVE" ]; then
+  RESOLVE="$RESOLVE" python3 - "$RESULTS_JSON" <<'PY'
+import json, os, sys
+f = sys.argv[1]; r = json.loads(os.environ["RESOLVE"])
+disabled = set(r.get("disabled") or []); allow = set(r.get("allow") or [])
+d = json.load(open(f, encoding="utf-8"))
+def keep(c):
+    n = c.get("name")
+    if n in disabled:
+        return False
+    if allow and n not in allow:
+        return False
+    return True
+d["checks"] = [c for c in d.get("checks", []) if keep(c)]
+json.dump(d, open(f, "w", encoding="utf-8"))
+PY
+fi
 
 # === Report generieren ===
 python3 "$SCRIPT_DIR/../_common/render-report.py" "$RESULTS_JSON" "$BRANCH" "$BASE" /tmp/ha-soft-presence-report-${PR}.md

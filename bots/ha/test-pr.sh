@@ -123,13 +123,22 @@ fi
 
 echo ']}' >> "$RESULTS_JSON"
 
-# Checks auf den aufgelösten (aktiven) Satz filtern — honoriert disable/checks aus .codemole.yml
-if [ -n "$ACTIVE" ]; then
-  ACTIVE="$ACTIVE" python3 - "$RESULTS_JSON" <<'PY'
+# Checks filtern: explizit Disabled raus; bei explizitem `checks:` nur diese (Allowlist).
+# Ein Namens-Mismatch zur Profil-Liste droppt NICHTS (nur disabled/allow zählen).
+if [ -n "$RESOLVE" ]; then
+  RESOLVE="$RESOLVE" python3 - "$RESULTS_JSON" <<'PY'
 import json, os, sys
-f = sys.argv[1]; act = set(os.environ["ACTIVE"].split())
+f = sys.argv[1]; r = json.loads(os.environ["RESOLVE"])
+disabled = set(r.get("disabled") or []); allow = set(r.get("allow") or [])
 d = json.load(open(f, encoding="utf-8"))
-d["checks"] = [c for c in d.get("checks", []) if c.get("name") in act]
+def keep(c):
+    n = c.get("name")
+    if n in disabled:
+        return False
+    if allow and n not in allow:
+        return False
+    return True
+d["checks"] = [c for c in d.get("checks", []) if keep(c)]
 json.dump(d, open(f, "w", encoding="utf-8"))
 PY
 fi

@@ -22,7 +22,7 @@ except ImportError:
 # Profil -> Check-Bündel (universell kommt immer dazu)
 PROFILES = {
     "ha-config":    ["yamllint", "ha-validate", "includes", "diff-size"],
-    "ha-component": ["python-lint", "manifest", "hacs", "translations", "diff-size"],
+    "ha-component": ["python-syntax", "manifest", "hacs", "translations", "diff-size"],
     "aem-eds":      ["eslint", "aem-block-validator", "visual", "diff-size"],
     "generic":      ["diff-size"],
 }
@@ -67,9 +67,11 @@ def main():
     if cfg is not None:
         source = cfgfile
         if cfg.get("checks"):
-            checks = list(cfg["checks"])
+            allow = list(cfg["checks"])           # explizite Allowlist
+            checks = list(allow)
             profile = cfg.get("profile") or "custom"
         else:
+            allow = []
             profile = cfg.get("profile") or detect(repo_dir)
             checks = PROFILES.get(profile, PROFILES["generic"]) + UNIVERSAL
         disabled = cfg.get("disable") or []
@@ -79,13 +81,14 @@ def main():
     else:
         profile = detect(repo_dir)
         source = "auto"
+        allow = []
         checks = PROFILES.get(profile, PROFILES["generic"]) + UNIVERSAL
         disabled, ignore, options = [], [], {}
 
     checks = [c for c in checks if c not in disabled]
     print(json.dumps({
         "profile": profile, "source": source, "checks": checks,
-        "disabled": disabled, "ignore": ignore, "options": options,
+        "allow": allow, "disabled": disabled, "ignore": ignore, "options": options,
     }))
 
 
