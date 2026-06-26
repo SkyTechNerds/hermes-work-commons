@@ -32,6 +32,14 @@ if [ -z "$DIFF_FILES" ]; then
   exit 0
 fi
 
+# --- Profil-Resolver (.codemole.yml -> Marker-Erkennung -> Default) ---
+RESOLVE="$(python3 "$SCRIPT_DIR/../_common/resolve-profile.py" "$REPO_DIR" "$REPO" 2>/dev/null)"
+PROFILE="$(printf '%s' "$RESOLVE" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("profile","ha-config"))' 2>/dev/null || echo ha-config)"
+PSOURCE="$(printf '%s' "$RESOLVE" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("source","auto"))' 2>/dev/null || echo auto)"
+ACTIVE="$(printf '%s' "$RESOLVE" | python3 -c 'import sys,json;print(" ".join(json.load(sys.stdin).get("checks",[])))' 2>/dev/null)"
+if [ "$PSOURCE" = "auto" ]; then SRCTXT="automatisch erkannt"; else SRCTXT="aus \`$PSOURCE\`"; fi
+export CODEMOLE_PROFILE_LINE="Profil: \`$PROFILE\` · $SRCTXT · [⚙ Konfigurierbar](https://web.skycryer.com/codemole/docs/#config)"
+
 RESULTS_JSON=/tmp/ha-test-${PR}.json
 echo '{"checks":[' > "$RESULTS_JSON"
 FIRST=1
@@ -114,6 +122,17 @@ else
 fi
 
 echo ']}' >> "$RESULTS_JSON"
+
+# Checks auf den aufgelösten (aktiven) Satz filtern — honoriert disable/checks aus .codemole.yml
+if [ -n "$ACTIVE" ]; then
+  ACTIVE="$ACTIVE" python3 - "$RESULTS_JSON" <<'PY'
+import json, os, sys
+f = sys.argv[1]; act = set(os.environ["ACTIVE"].split())
+d = json.load(open(f, encoding="utf-8"))
+d["checks"] = [c for c in d.get("checks", []) if c.get("name") in act]
+json.dump(d, open(f, "w", encoding="utf-8"))
+PY
+fi
 
 python3 "$SCRIPT_DIR/../_common/render-report.py" "$RESULTS_JSON" "$BRANCH" "$BASE" /tmp/ha-report-${PR}.md
 python3 /opt/ha-testing/post-comment.py "$PR" /tmp/ha-report-${PR}.md

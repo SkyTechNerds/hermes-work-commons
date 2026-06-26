@@ -21,6 +21,7 @@ Format (identisch zu JUMO):
   <sub>hermes-work · branch `x` · base `y`</sub>
 """
 import json
+import os
 import sys
 
 ICON = {"pass": "✅", "fail": "❌", "warn": "⚠️", "skip": "⚪"}
@@ -36,7 +37,11 @@ def status_line(c):
 
 def render(checks, branch="", base=""):
     lines = [status_line(c) for c in checks]
-    body = "## 🧪 Automatischer PR-Test\n\n" + "\n".join(lines)
+    body = "## 🧪 Automatischer PR-Test\n"
+    prof = os.environ.get("CODEMOLE_PROFILE_LINE", "")
+    if prof:
+        body += prof + "\n"
+    body += "\n" + "\n".join(lines)
     details = [
         f"### {c['name']}\n{c['message']}"
         for c in checks
