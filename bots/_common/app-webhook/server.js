@@ -141,6 +141,27 @@ async function handlePullRequest(payload) {
   log(`ai-review ${repo}#${pr}: ${fm ? fm[1] : '?'} findings (exit ${review.code})`);
 }
 
+// Antwortet auf Replies zu eigenen Inline-Findings (pull_request_review_comment).
+async function handleReviewComment(payload) {
+  const c = payload.comment || {};
+  const repo = payload.repository.full_name;
+  const pr = payload.pull_request && payload.pull_request.number;
+  const installationId = payload.installation && payload.installation.id;
+
+  if (!c.in_reply_to_id) { log(`skip reply ${repo}#${pr}: kein Reply (Top-Level)`); return; }
+  if (c.user && c.user.type === 'Bot') { log(`skip reply ${repo}#${pr}: Bot-Autor (Loop-Schutz)`); return; }
+  if (!installationId || !pr) return;
+
+  let token;
+  try { token = await installationToken(installationId); }
+  catch (e) { log(`reply token-fail ${repo}#${pr}: ${e.message}`); return; }
+
+  log(`reply ${repo}#${pr} on comment ${c.id} (-> ${c.in_reply_to_id})`);
+  const out = await run(path.join(BOTS_DIR, '_common', 'ai-reply.sh'),
+    [repo, String(pr), String(c.id)], token, projectForRepo(repo));
+  log(`ai-reply ${repo}#${pr}: ${out.out.slice(-140).replace(/\n/g, ' ')}`);
+}
+
 // --- HTTP-Server -----------------------------------------------------------
 
 function verify(sigHeader, body) {
@@ -179,6 +200,8 @@ const server = http.createServer((req, res) => {
     if (event === 'pull_request' &&
         ['opened', 'reopened', 'synchronize', 'ready_for_review'].includes(payload.action)) {
       handlePullRequest(payload).catch(e => log(`handler-error: ${e.message}`));
+    } else if (event === 'pull_request_review_comment' && payload.action === 'created') {
+      handleReviewComment(payload).catch(e => log(`reply-error: ${e.message}`));
     } else {
       log(`ignored event=${event} action=${payload.action || '-'}`);
     }
