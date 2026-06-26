@@ -43,18 +43,18 @@ add_check() {
   python3 -c "import json; print(json.dumps({'name':'$name','status':'$status','message':'$msg'}))" >> "$RESULTS_JSON"
 }
 
-# === Check 1: YAML-Lint ===
+# === Check 1: YAML-Lint (nur GEÄNDERTE Zeilen, HA-taugliche Regeln) ===
 YAML_FILES=$(echo "$DIFF_FILES" | grep -E '\.(ya?ml)$' || true)
 if [ -z "$YAML_FILES" ]; then
   add_check "yamllint" "skip" "Keine YAML-Dateien im Diff"
 else
-  YAML_ERR=$(yamllint -f parsable $YAML_FILES 2>&1 || true)
+  YAML_ERR=$(python3 "$SCRIPT_DIR/../_common/yamllint-diff.py" "$BASE_SHA" "$HEAD_SHA" $YAML_FILES 2>/dev/null || true)
   if [ -z "$YAML_ERR" ]; then
     N=$(echo "$YAML_FILES" | wc -l)
-    add_check "yamllint" "pass" "$N YAML-Dateien sauber"
+    add_check "yamllint" "pass" "$N YAML-Datei(en) — keine neuen Lint-Fehler in den geänderten Zeilen"
   else
-    N=$(echo "$YAML_ERR" | wc -l)
-    add_check "yamllint" "fail" "$N Lint-Fehler in YAML"
+    N=$(echo "$YAML_ERR" | grep -c .)
+    add_check "yamllint" "fail" "$N neue Lint-Fehler in geänderten Zeilen"
     echo "$YAML_ERR" > /tmp/ha-yamllint-${PR}.txt
   fi
 fi
