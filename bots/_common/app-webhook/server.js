@@ -131,8 +131,8 @@ async function handlePullRequest(payload) {
   catch (e) { log(`token-fail ${repo}#${pr}: ${e.message}`); return; }
 
   log(`run ${repo}#${pr} (${branch} -> ${base}, project=${project})`);
-  const test = await run(path.join(BOTS_DIR, project, 'test-pr.sh'),
-    [String(pr), branch, base, 'collect'], token, project);
+  const test = await run(path.join(BOTS_DIR, '_common', 'run-checks.sh'),
+    [repo, String(pr), branch, base, 'post'], token, project);
   log(`test ${repo}#${pr} exit ${test.code}: ${test.out.slice(-160).replace(/\n/g, ' ')}`);
 
   const review = await run(path.join(BOTS_DIR, '_common', 'ai-review.sh'),
