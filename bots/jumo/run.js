@@ -50,6 +50,32 @@ const PLACEHOLDER_FILES = ['jumo.json', 'jumo-search.json'];
 
 const ICON = { ok: '✅', fail: '❌', warn: '⚠️', skip: '⚪' };
 
+// --- .codemole.yml-Integration (gemeinsam mit den HA-Runnern: Profil-Header + disable/ignore) ---
+let PROFILE_LINE = '';
+let CM_DISABLED = [];
+let CM_IGNORE = [];
+function slug(name) { return String(name).toLowerCase().replace(/\s+/g, '-'); }
+function resolveProfile() {
+  try {
+    const out = execFileSync('python3',
+      [path.join(__dirname, '..', '_common', 'resolve-profile.py'), REPO_DIR, REPO],
+      { encoding: 'utf8' });
+    return JSON.parse(out);
+  } catch (e) {
+    return { profile: 'aem-eds', source: 'auto', disabled: [], ignore: [], options: {} };
+  }
+}
+function globToRe(g) {
+  const esc = g.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.');
+  return new RegExp('^' + esc + '$');
+}
+function ignoredPath(p, globs) {
+  return (globs || []).some((g) => {
+    const g2 = g.replace(/\*\*\//g, '').replace(/\*\*/g, '*');
+    return globToRe(g).test(p) || globToRe(g2).test(p) || globToRe('*/' + g2).test(p);
+  });
+}
+
 // ---------------------------------------------------------------------------
 // CLI-Argumente
 // ---------------------------------------------------------------------------
@@ -617,7 +643,9 @@ function buildComment(results) {
   const details = results
     .filter((r) => !r.ok || r.detail.includes('\n'))
     .map((r) => `### ${r.name}\n${r.detail}`);
-  let body = `## 🧪 Automatischer PR-Test\n\n${lines.join('\n')}`;
+  let body = `## 🧪 Automatischer PR-Test\n`;
+  if (PROFILE_LINE) body += PROFILE_LINE + '\n';
+  body += `\n${lines.join('\n')}`;
   if (details.length) body += `\n\n---\n\n${details.join('\n\n')}`;
   body += `\n\n<sub>hermes-work · branch \`${BRANCH}\` · base \`${BASE_BRANCH}\`</sub>`;
   return body;
@@ -656,10 +684,16 @@ async function main() {
   const pr = await resolveBaseBranch(PR_NUMBER);
   ensureRefs();
   const exceptions = loadExceptions();
+  const cm = resolveProfile();
+  CM_DISABLED = cm.disabled || [];
+  CM_IGNORE = cm.ignore || [];
+  const cmSrc = cm.source === 'auto' ? 'automatisch erkannt' : ('aus `' + cm.source + '`');
+  PROFILE_LINE = 'Profil: `' + cm.profile + '` · ' + cmSrc + ' · [⚙ Konfigurierbar](https://web.skycryer.com/codemole/docs/#config)';
 
   pr.body = pr.body || '';
   const prLabels = (pr.labels || []).map((l) => l.name);
-  const files = await ghApi(`/repos/${REPO}/pulls/${PR_NUMBER}/files?per_page=100`);
+  let files = await ghApi(`/repos/${REPO}/pulls/${PR_NUMBER}/files?per_page=100`);
+  if (CM_IGNORE.length) files = files.filter((f) => !ignoredPath(f.filename, CM_IGNORE));
 
   if (MODE === 'update-snapshots') {
     // Visual-Baselines neu erzeugen + committen + pushen (Server-Modus, LXC).
@@ -677,7 +711,7 @@ async function main() {
     checkVisualTests(files),
     checkMergeFreshness(),
     checkStaticScans(files, exceptions),
-  ];
+  ].filter((r) => !CM_DISABLED.includes(slug(r.name)));
 
   const body = buildComment(results);
   await postComment(body);
