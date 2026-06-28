@@ -23,6 +23,7 @@ cd "$REPO_DIR"
 git fetch --quiet origin "$BRANCH" "$BASE" 2>/dev/null
 git checkout --quiet "$BRANCH" 2>/dev/null || true
 git reset --quiet --hard "origin/$BRANCH" 2>/dev/null || true
+git clean -fdq 2>/dev/null || true   # stale untracked Dateien (z.B. alte .codemole.yml) entfernen -> pristiner Checkout
 
 export BASE_SHA="$(git rev-parse "origin/$BASE")"
 export HEAD_SHA="$(git rev-parse HEAD)"
