@@ -25,6 +25,7 @@ const { spawn } = require('node:child_process');
 
 const CONF_DIR = process.env.HERMES_APP_CONF || '/etc/hermes-work-app';
 const BOTS_DIR = process.env.HERMES_BOTS_DIR || '/opt/hermes-work-commons/bots';
+const ALLOWED_OWNERS = ['SkyTechNerds', 'JUMO-GmbH-Co-KG'];  // bei public: nur diese Orgs bedienen
 const PORT = parseInt(process.env.PORT || '3956', 10);
 const LOG = process.env.HERMES_APP_LOG || '/var/log/hermes-work-app.log';
 const WORKROOT = process.env.HERMES_APP_WORKROOT || '/opt/hermes-app-workdir';
@@ -110,6 +111,7 @@ function run(script, args, token, project) {
 
 async function handlePullRequest(payload) {
   const repo = payload.repository.full_name;
+  if (!ALLOWED_OWNERS.includes((repo || '').split('/')[0])) { log(`skip ${repo}: owner nicht in Whitelist`); return; }
   const pr = payload.number || (payload.pull_request && payload.pull_request.number);
   const prData = payload.pull_request || {};
   const branch = prData.head && prData.head.ref;
@@ -145,6 +147,7 @@ async function handlePullRequest(payload) {
 async function handleReviewComment(payload) {
   const c = payload.comment || {};
   const repo = payload.repository.full_name;
+  if (!ALLOWED_OWNERS.includes((repo || '').split('/')[0])) { log(`skip ${repo}: owner nicht in Whitelist`); return; }
   const pr = payload.pull_request && payload.pull_request.number;
   const installationId = payload.installation && payload.installation.id;
 

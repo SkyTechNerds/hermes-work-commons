@@ -36,6 +36,14 @@ PSOURCE="$(printf '%s' "$RESOLVE" | python3 -c 'import sys,json;print(json.load(
 CHECKS="$(printf '%s' "$RESOLVE" | python3 -c 'import sys,json;print(" ".join(json.load(sys.stdin).get("checks",[])))' 2>/dev/null)"
 if [ "$PSOURCE" = "auto" ]; then SRCTXT="automatisch erkannt"; else SRCTXT="aus \`$PSOURCE\`"; fi
 export CODEMOLE_PROFILE_LINE="Profil: \`$PROFILE\` · $SRCTXT · [⚙ Konfigurierbar](https://web.skycryer.com/codemole/docs/#config)"
+
+# aem-eds (z.B. JUMO) hat einen eigenen Node-Runner run.js (9 Checks, zu komplex für Bash-Module).
+# Delegieren: run.js löst Profil/Header selbst auf, fährt die Checks und postet (mode=post).
+# Env (REPO/REPO_DIR/GH_TOKEN/GITHUB_TOKEN) ist gesetzt -> postet im App-Pfad als thecodemole[bot].
+if [ "$PROFILE" = "aem-eds" ] && [ -f "$COMMON/../jumo/run.js" ]; then
+  [ "$MODE" = "dry" ] && export DRY_RUN=1
+  exec node "$COMMON/../jumo/run.js" "$BRANCH" "$PR" "$BASE" collect
+fi
 export DIFF_FILES="$(printf '%s\n' "$DIFF_FILES" | RESOLVE="$RESOLVE" python3 "$COMMON/path-ignored.py")"
 
 export REPO PR BASE_SHA HEAD_SHA DIFF_FILES GH_TOKEN GITHUB_TOKEN REPO_DIR
