@@ -1,0 +1,9 @@
+{
+  "name": "codemole-page-audit",
+  "private": true,
+  "description": "Schneller Seiten-Audit (axe-core a11y + Semantik + Timing) für CodeMole — Zwei-Pass base vs branch, meldet nur Verschlechterungen.",
+  "dependencies": {
+    "playwright": "^1.49.0",
+    "@axe-core/playwright": "^4.10.0"
+  }
+}

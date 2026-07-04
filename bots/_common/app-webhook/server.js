@@ -155,6 +155,12 @@ async function handlePullRequest(payload) {
     [repo, String(pr)], token, project);
   const fm = review.out.match(/AI-REVIEW: (\d+)/);
   log(`ai-review ${repo}#${pr}: ${fm ? fm[1] : '?'} findings (exit ${review.code})`);
+
+  // page-audit (a11y/Semantik/Timing, Zwei-Pass) — no-op ohne page-audit-Config in .codemole.yml
+  const audit = await run(path.join(BOTS_DIR, '_common', 'page-audit', 'audit.sh'),
+    [repo, String(pr), branch, base], token, project);
+  const am = audit.out.match(/PAGE-AUDIT: (\d+|nicht konfiguriert)/);
+  log(`page-audit ${repo}#${pr}: ${am ? am[1] : '?'} (exit ${audit.code})`);
 }
 
 // Antwortet auf Replies zu eigenen Inline-Findings (pull_request_review_comment).
