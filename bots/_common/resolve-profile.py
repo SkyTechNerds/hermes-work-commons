@@ -22,7 +22,7 @@ except ImportError:
 
 # Profil -> Check-Bündel (universell kommt immer dazu)
 PROFILES = {
-    "ha-config":    ["yamllint", "ha-validate", "includes", "secret-refs", "duplicate-ids", "diff-size"],
+    "ha-config":    ["yamllint", "ha-validate", "includes", "secret-refs", "duplicate-ids", "automation-safety", "diff-size"],
     "ha-component": ["python-syntax", "ruff", "manifest", "hacs", "translations", "json-valid", "diff-size"],
     "aem-eds":      ["eslint", "aem-block-validator", "visual", "diff-size"],
     "generic":      ["diff-size"],
