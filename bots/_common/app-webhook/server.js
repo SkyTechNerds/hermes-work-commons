@@ -34,6 +34,19 @@ const APP_ID = fs.readFileSync(path.join(CONF_DIR, 'app-id'), 'utf8').trim();
 const PRIVATE_KEY = fs.readFileSync(path.join(CONF_DIR, 'private-key.pem'), 'utf8');
 const WEBHOOK_SECRET = fs.readFileSync(path.join(CONF_DIR, 'webhook-secret'), 'utf8').trim();
 
+// Discord-Sichtbarkeit: kompakte Status-Meldung nach jeder Verarbeitung (optional).
+// Webhook-URL in /etc/hermes-work-app/discord-webhook (chmod 600); fehlt sie -> stiller no-op.
+let DISCORD_WEBHOOK = '';
+try { DISCORD_WEBHOOK = fs.readFileSync(path.join(CONF_DIR, 'discord-webhook'), 'utf8').trim(); } catch {}
+function notifyDiscord(text) {
+  if (!DISCORD_WEBHOOK) return;
+  fetch(DISCORD_WEBHOOK, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content: text.slice(0, 1900), username: 'CodeMole', allowed_mentions: { parse: [] } }),
+  }).catch((e) => log(`discord-notify-fail: ${e.message}`));
+}
+
 function log(msg) {
   const line = `${new Date().toISOString()} ${msg}\n`;
   process.stdout.write(line);
@@ -161,6 +174,12 @@ async function handlePullRequest(payload) {
     [repo, String(pr), branch, base], token, project);
   const am = audit.out.match(/PAGE-AUDIT: (\d+|nicht konfiguriert)/);
   log(`page-audit ${repo}#${pr}: ${am ? am[1] : '?'} (exit ${audit.code})`);
+
+  const passC = (test.out.match(/\u2705/g) || []).length;
+  const failC = (test.out.match(/\u274c/g) || []).length;
+  const findings = fm ? fm[1] : '0';
+  const auditTxt = am && /^\d+$/.test(am[1]) && am[1] !== '0' ? ` \u00b7 \ud83d\udd0e ${am[1]} Audit` : '';
+  notifyDiscord(`\ud83e\uddab **${repo}#${pr}** \u00b7 \`${branch}\` \u2192 \`${base}\`\nTests: ${passC}\u2705 ${failC}\u274c \u00b7 Review: ${findings} Finding(s)${auditTxt}\n<https://github.com/${repo}/pull/${pr}>`);
 }
 
 // Antwortet auf Replies zu eigenen Inline-Findings (pull_request_review_comment).
@@ -183,6 +202,7 @@ async function handleReviewComment(payload) {
   const out = await run(path.join(BOTS_DIR, '_common', 'ai-reply.sh'),
     [repo, String(pr), String(c.id)], token, projectForRepo(repo));
   log(`ai-reply ${repo}#${pr}: ${out.out.slice(-140).replace(/\n/g, ' ')}`);
+  if (/geantwortet/.test(out.out)) notifyDiscord(`\ud83e\uddab **${repo}#${pr}** \u00b7 auf Review-Reply geantwortet\n<https://github.com/${repo}/pull/${pr}>`);
 }
 
 // Lighthouse on-demand: Label `lighthouse` an den PR → schwerer Zwei-Pass-Lauf,
@@ -205,6 +225,7 @@ async function handleLighthouse(payload) {
   const out = await run(path.join(BOTS_DIR, '_common', 'page-audit', 'lighthouse.sh'),
     [repo, String(pr), branch, base], token, projectForRepo(repo));
   log(`lighthouse ${repo}#${pr}: ${out.out.slice(-120).replace(/\n/g, ' ')}`);
+  if (/LIGHTHOUSE: fertig/.test(out.out)) notifyDiscord(`\u26a1 **${repo}#${pr}** \u00b7 Lighthouse-Lauf fertig (Label-Trigger)\n<https://github.com/${repo}/pull/${pr}>`);
 }
 
 // --- HTTP-Server -----------------------------------------------------------
