@@ -323,10 +323,21 @@ async function handleTestRequest(message, channelCfg, parsed) {
   // spoofed Discord message cannot run an arbitrary repo.
   let repo = channelCfg && channelCfg.repo;
   if (channelCfg && channelCfg.shared) {
-    repo = parsed.repo || repo;
+    if (parsed.repo) {
+      repo = parsed.repo;
+    } else if (repo && parsed.prefix === (channelCfg.trigger_prefix || 'TEST_REQUEST')) {
+      // Nachricht OHNE repo= (alter JUMO-Inline-Workflow postet nur branch=/pr=):
+      // nur über den Kanal-Prefix aufs Default-Repo routen. Das verhindert zugleich
+      // Doppel-Läufe, wenn derselbe Workflow TEST_REQUEST UND JUMO_TEST_REQUEST postet.
+      // (Ohne diesen Zweig war der JUMO-Pfad seit der Shared-Umstellung still tot.)
+    } else {
+      log(`skip ${prefix} pr=${pr}: kein repo= in der Nachricht und Prefix passt nicht zum Kanal-Default`);
+      return;
+    }
     const allow = Array.isArray(channelCfg.allowed_repos) ? channelCfg.allowed_repos : [];
     if (!repo || (allow.length && !allow.includes(repo))) {
-      return;  // not the listener's repo (e.g. JUMO) -> Nero handles it
+      log(`skip ${prefix} pr=${pr}: repo ${repo || '-'} nicht in allowed_repos`);
+      return;
     }
   }
 

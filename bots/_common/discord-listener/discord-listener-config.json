@@ -1,11 +1,12 @@
 {
-  "version": "1.3.0+shared",
+  "version": "1.4.0+shared-default-repo",
   "description": "Channel-Repo-Mapping für hermes-work Discord-Listener (Shared #jumo, alle Repos)",
   "channels": [
     {
       "id": "1483798451786350741",
       "name": "jumo",
       "trigger_prefix": "JUMO_TEST_REQUEST",
+      "repo": "JUMO-GmbH-Co-KG/JUMO-Website-CMS",
       "github": {
         "token_file": "/etc/hermes-discord-listener/jumo.token"
       },
