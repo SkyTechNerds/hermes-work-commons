@@ -660,6 +660,18 @@ function checkStaticScans(files, exceptions) {
         if (/outline:\s*none/.test(line)) issues.push(`outline: none (WCAG) in ${f.filename}:${i + 1}`);
       });
     }
+    // Token-Compliance: hardcodierte Farben statt var(--…) — nur in NEUEN Zeilen (f.patch),
+    // sonst Altlasten-Flut. Custom-Property-DEFINITIONEN (--x: #abc) sind legitim (Token selbst).
+    if (isCss(f.filename) && f.patch && !hasProjectException(exceptions, 'hardcoded-colors')) {
+      f.patch.split('\n').forEach((pl) => {
+        if (!pl.startsWith('+') || pl.startsWith('+++')) return;
+        const code = pl.slice(1);
+        if (/^\s*--[\w-]+\s*:/.test(code)) return;               // Token-Definition
+        if (/:\s*[^;{}]*(#[0-9a-fA-F]{3,8}\b|rgba?\()/.test(code)) {
+          warns.push(`Hardcodierte Farbe statt var(--…) in ${f.filename}: \`${code.trim().slice(0, 70)}\``);
+        }
+      });
+    }
   }
   const deltaKb = bundleDelta / 1024;
   if (deltaKb > BUNDLE_GROWTH_WARN_KB) warns.push(`JS-Bundle +${deltaKb.toFixed(1)} KB`);
