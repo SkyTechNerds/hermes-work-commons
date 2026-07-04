@@ -185,6 +185,28 @@ async function handleReviewComment(payload) {
   log(`ai-reply ${repo}#${pr}: ${out.out.slice(-140).replace(/\n/g, ' ')}`);
 }
 
+// Lighthouse on-demand: Label `lighthouse` an den PR → schwerer Zwei-Pass-Lauf,
+// Ergebnis als eigener Kommentar. Läuft bewusst NICHT bei jedem Push (zu langsam).
+async function handleLighthouse(payload) {
+  const repo = payload.repository.full_name;
+  if (!ALLOWED_OWNERS.includes((repo || '').split('/')[0])) { log(`skip ${repo}: owner nicht in Whitelist`); return; }
+  const prData = payload.pull_request || {};
+  const pr = prData.number;
+  const branch = prData.head && prData.head.ref;
+  const base = (prData.base && prData.base.ref) || 'main';
+  const installationId = payload.installation && payload.installation.id;
+  if (prData.state !== 'open' || !pr || !branch || !installationId) return;
+
+  let token;
+  try { token = await installationToken(installationId); }
+  catch (e) { log(`lighthouse token-fail ${repo}#${pr}: ${e.message}`); return; }
+
+  log(`lighthouse ${repo}#${pr} (Label-Trigger, ${branch} vs ${base})`);
+  const out = await run(path.join(BOTS_DIR, '_common', 'page-audit', 'lighthouse.sh'),
+    [repo, String(pr), branch, base], token, projectForRepo(repo));
+  log(`lighthouse ${repo}#${pr}: ${out.out.slice(-120).replace(/\n/g, ' ')}`);
+}
+
 // --- HTTP-Server -----------------------------------------------------------
 
 function verify(sigHeader, body) {
@@ -236,6 +258,9 @@ const server = http.createServer((req, res) => {
     if (event === 'pull_request' &&
         ['opened', 'reopened', 'synchronize', 'ready_for_review'].includes(payload.action)) {
       handlePullRequest(payload).catch(e => log(`handler-error: ${e.message}`));
+    } else if (event === 'pull_request' && payload.action === 'labeled' &&
+               payload.label && payload.label.name === 'lighthouse') {
+      handleLighthouse(payload).catch(e => log(`lighthouse-error: ${e.message}`));
     } else if (event === 'pull_request_review_comment' && payload.action === 'created') {
       handleReviewComment(payload).catch(e => log(`reply-error: ${e.message}`));
     } else {
