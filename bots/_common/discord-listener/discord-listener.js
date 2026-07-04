@@ -26,7 +26,7 @@
 'use strict';
 
 const { Client, GatewayIntentBits, Events, EmbedBuilder } = require('discord.js');
-const { spawn, execSync } = require('node:child_process');
+const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -162,11 +162,10 @@ function validatePr(pr) {
 
 // --- Bot Identification ----------------------------------------------------
 
-// Resolve the project directory (under BOTS_DIR) for a repo. The mapping
-// MUST come from the channel config — repo names do not always match
-// project directory names (e.g. JUMO-GmbH-Co-KG/JUMO-Website-CMS → "jumo").
-// `channelCfg` is the only authoritative source; this function is a
-// last-resort fallback used only when channelCfg.project is missing.
+// Resolve the project directory (under BOTS_DIR) for a repo. Repo names do
+// not always match project directory names (e.g. JUMO-Website-CMS → "jumo").
+// resolveProject() prefers THIS mapping (repo= from the message wins on shared
+// channels); channelCfg.project is only the fallback when no repo is known.
 function projectForRepo(repoFullName) {
   const parts = repoFullName.split('/');
   if (parts.length !== 2) return null;
@@ -231,6 +230,9 @@ function runTest(repoFullName, pr, branch, project, mode = 'collect') {
       if (code === 0) resolve({ stdout, stderr });
       else reject(new Error(`test exit ${code}: ${stderr.slice(-500)}`));
     });
+    // Ohne error-Handler bliebe die Promise bei einem Spawn-Fehler für immer
+    // offen -> Discord-Ack hinge ewig auf "🔄 Running…".
+    result.on('error', err => reject(new Error(`spawn failed: ${err.message}`)));
   });
 }
 

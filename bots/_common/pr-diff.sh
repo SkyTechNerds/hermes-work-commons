@@ -11,8 +11,8 @@ REPO="$1"; PR="$2"
 # Vorgegebenes Env-Token (z. B. App-Installation-Token) hat Vorrang; sonst PAT laden.
 if [ -z "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ]; then
   case "$REPO" in
-    *JUMO*) TOKFILE=/etc/hermes-discord-listener/jumo.token ;;
-    *)      TOKFILE=/etc/hermes-discord-listener/hank.token ;;
+    JUMO-GmbH-Co-KG/*) TOKFILE=/etc/hermes-discord-listener/jumo.token ;;
+    *)                 TOKFILE=/etc/hermes-discord-listener/hank.token ;;
   esac
   export GH_TOKEN; GH_TOKEN="$(cat "$TOKFILE")"
 elif [ -z "${GH_TOKEN:-}" ]; then
