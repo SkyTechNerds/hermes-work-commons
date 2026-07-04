@@ -40,6 +40,14 @@ function log(msg) {
   try { fs.appendFileSync(LOG, line); } catch {}
 }
 
+// Ref-Namen aus dem Webhook-Payload landen in git-/Script-Argumenten -> validieren
+// (gleiche Regeln wie SAFE_BRANCH im Discord-Listener).
+function validRef(ref) {
+  return typeof ref === 'string' && ref.length > 0 && ref.length <= 200
+    && /^[A-Za-z0-9._\/-]+$/.test(ref)
+    && !ref.includes('..') && !ref.startsWith('-') && !ref.startsWith('/');
+}
+
 function projectForRepo(full) {
   const name = (full || '').split('/')[1] || '';
   if (name === 'homeassistant-config') return 'ha';
@@ -127,6 +135,12 @@ async function handlePullRequest(payload) {
   if (prData.draft) { log(`skip ${repo}#${pr}: draft`); return; }
   if (!installationId) { log(`skip ${repo}#${pr}: keine installation.id`); return; }
   if (!project || !branch) { log(`skip ${repo}#${pr}: project/branch fehlt`); return; }
+  if (!validRef(branch) || !validRef(base)) {
+    log(`skip ${repo}#${pr}: ungültiger Ref-Name (branch/base)`); return;
+  }
+  if (!/^[A-Za-z0-9._-]+$/.test(project)) {
+    log(`skip ${repo}#${pr}: ungültiger Projekt-Name`); return;
+  }
 
   let token;
   try { token = await installationToken(installationId); }
@@ -183,9 +197,22 @@ const server = http.createServer((req, res) => {
   if (req.method !== 'POST' || !req.url.endsWith('/webhook')) {
     res.writeHead(404); return res.end('not found\n');
   }
+  // Body-Limit VOR der Signaturprüfung: PR-Payloads sind klein; unbegrenztes
+  // Sammeln wäre ein Memory-DoS am öffentlichen Endpoint.
+  const MAX_BODY = 2 * 1024 * 1024;
   const chunks = [];
-  req.on('data', c => chunks.push(c));
+  let received = 0;
+  let tooBig = false;
+  req.on('data', c => {
+    received += c.length;
+    if (received > MAX_BODY) {
+      if (!tooBig) { tooBig = true; log(`payload too large (${received}b), dropping`); req.destroy(); }
+      return;
+    }
+    chunks.push(c);
+  });
   req.on('end', () => {
+    if (tooBig) return;
     const body = Buffer.concat(chunks);
     if (!verify(req.headers['x-hub-signature-256'], body)) {
       log('signature-FAIL'); res.writeHead(401); return res.end('bad signature\n');

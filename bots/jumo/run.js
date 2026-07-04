@@ -49,6 +49,14 @@ const VISUAL_SPEC_DIRS = ['tests/visual-styleguide', 'tests/visual'];
 const PLACEHOLDER_FILES = ['jumo.json', 'jumo-search.json'];
 
 const ICON = { ok: '✅', fail: '❌', warn: '⚠️', skip: '⚪' };
+const MAX_LINT_PROBLEMS = 30;             // Detail-Cap gegen Mega-Kommentare (minifizierte Files)
+
+/** Problem-Liste fürs Kommentar-Detail begrenzen. */
+function capProblems(problems) {
+  if (problems.length <= MAX_LINT_PROBLEMS) return problems.join('\n');
+  return problems.slice(0, MAX_LINT_PROBLEMS).join('\n')
+    + `\n… +${problems.length - MAX_LINT_PROBLEMS} weitere`;
+}
 
 // --- .codemole.yml-Integration (gemeinsam mit den HA-Runnern: Profil-Header + disable/ignore) ---
 let PROFILE_LINE = '';
@@ -91,6 +99,17 @@ if (!BRANCH || !PR_NUMBER) {
   process.exit(2);
 }
 
+// Ref-Namen landen in git-Argumenten — Shell-Metazeichen/Flags/Traversal ablehnen
+// (der App-Webhook-Pfad liefert Branch-Namen aus dem PR-Payload = untrusted).
+function validRef(ref) {
+  return typeof ref === 'string' && ref.length <= 200
+    && /^[A-Za-z0-9._\/-]+$/.test(ref) && !ref.includes('..') && !ref.startsWith('-') && !ref.startsWith('/');
+}
+if (!validRef(BRANCH) || !/^\d+$/.test(PR_NUMBER) || (BASE_BRANCH_ARG && !validRef(BASE_BRANCH_ARG))) {
+  console.error(`Ungültige Argumente: branch='${BRANCH}' pr='${PR_NUMBER}' base='${BASE_BRANCH_ARG}'`);
+  process.exit(2);
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -107,10 +126,11 @@ function resolveToken() {
 
 const TOKEN = resolveToken();
 
-/** Shell-Befehl im Repo-Verzeichnis, gibt stdout (trimmed) zurück; '' bei Fehler. */
-function git(args) {
+/** git-Befehl im Repo-Verzeichnis (execFileSync, KEINE Shell — Branch-/Dateinamen
+ *  aus dem PR sind untrusted), gibt stdout (trimmed) zurück; '' bei Fehler. */
+function git(...args) {
   try {
-    return execSync(`git ${args}`, { cwd: REPO_DIR, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    return execFileSync('git', args, { cwd: REPO_DIR, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
   } catch {
     return '';
   }
@@ -129,19 +149,22 @@ async function ghApi(endpoint) {
   return res.json();
 }
 
-/** Inhalt einer Datei auf einem Ref (origin/<ref>:path); null wenn nicht vorhanden. */
+/** Inhalt einer Datei auf einem Ref (origin/<ref>:path); null wenn nicht vorhanden.
+ *  execFileSync mit Argument-Array: PR-Dateinamen dürfen nie durch eine Shell. */
 function fileAtRef(ref, file) {
   try {
-    return execSync(`git show ${ref}:${file}`, { cwd: REPO_DIR, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    return execFileSync('git', ['show', `${ref}:${file}`],
+      { cwd: REPO_DIR, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
   } catch {
     return null;
   }
 }
 
-/** Zeilenanzahl einer Datei auf einem Ref. */
+/** Zeilenanzahl einer Datei auf einem Ref (leere Datei = 0). */
 function lineCountAtRef(ref, file) {
   const c = fileAtRef(ref, file);
-  return c == null ? null : c.split('\n').length;
+  if (c == null) return null;
+  return c === '' ? 0 : c.split('\n').length;
 }
 
 /** Lädt testing-rules.json-Ausnahmen aus dem Repo. */
@@ -183,7 +206,7 @@ function blockNameOf(file) {
 async function resolveBaseBranch(prNumber) {
   const pr = await ghApi(`/repos/${REPO}/pulls/${prNumber}`);
   const fromPr = pr?.base?.ref;
-  if (fromPr) {
+  if (fromPr && validRef(fromPr)) {
     if (BASE_BRANCH_ARG && BASE_BRANCH_ARG !== fromPr) {
       console.warn(`Hinweis: CLI-base='${BASE_BRANCH_ARG}' ignoriert — PR mergt nach '${fromPr}'`);
     }
@@ -199,19 +222,19 @@ function ensureRefs() {
   // Es werden drei Refs geholt: dev (für BASE_URL_DEV-Fallbacks), der PR-Head und
   // der effektive Merge-Base-Branch (kann != dev sein, z. B. wcms-2777-tokens).
   const authUrl = `https://x-access-token:${TOKEN}@github.com/${REPO}.git`;
-  git(`fetch ${authUrl} --depth 50 `
-    + `+refs/heads/dev:refs/remotes/origin/dev `
-    + `+refs/heads/${BASE_BRANCH}:refs/remotes/origin/${BASE_BRANCH} `
-    + `+refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}`);
+  git('fetch', authUrl, '--depth', '50',
+    '+refs/heads/dev:refs/remotes/origin/dev',
+    `+refs/heads/${BASE_BRANCH}:refs/remotes/origin/${BASE_BRANCH}`,
+    `+refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}`);
   // Arbeitsbaum auf den PR-Head bringen — sonst linten/scannen wir den Default-Branch
   // statt der PR-Änderungen. In CI (dediziertes /opt/jumo-cms) immer; auf einem
   // lokalen Arbeitsrepo nur mit FORCE_CHECKOUT=1, um ungespeicherte Arbeit zu schützen.
-  const dirty = git('status --porcelain');
+  const dirty = git('status', '--porcelain');
   if (dirty && process.env.FORCE_CHECKOUT !== '1') {
     console.warn('WARN: Arbeitsbaum nicht sauber → kein Checkout (lokaler Modus). FORCE_CHECKOUT=1 erzwingt ihn.');
     return;
   }
-  git(`checkout -f -B ${BRANCH} origin/${BRANCH}`);
+  git('checkout', '-f', '-B', BRANCH, `origin/${BRANCH}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -272,15 +295,23 @@ function checkJsLint(files) {
     .map((f) => f.filename)
     .filter((f) => fs.existsSync(path.join(REPO_DIR, f)));
   if (!targets.length) return { name: 'JS Lint', ok: true, detail: 'Keine geänderten JS/JSON-Dateien' };
-  let out;
+  // --no-install: nie Pakete on-the-fly aus npm nachladen; Timeout gegen Hänger.
+  let out; let execErr = null;
   try {
-    out = execFileSync('npx', ['eslint', ...targets, '--ext', '.js,.mjs,.json', '-f', 'json'],
-      { cwd: REPO_DIR, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    out = execFileSync('npx', ['--no-install', 'eslint', ...targets, '--ext', '.js,.mjs,.json', '-f', 'json'],
+      { cwd: REPO_DIR, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 180000 });
   } catch (e) {
-    out = e.stdout || '[]';
+    out = e.stdout; execErr = e;
   }
-  let results = [];
-  try { results = JSON.parse(out); } catch { /* ignore */ }
+  // "ESLint lief mit Findings" (exit 1 + JSON) sauber von "ESLint konnte nicht
+  // laufen" (kein/kaputter Output) trennen — Letzteres darf NICHT grün werden.
+  if (!out || !String(out).trim()) {
+    return { name: 'JS Lint', ok: false, detail: `ESLint konnte nicht ausgeführt werden: ${String(execErr && execErr.message || 'kein Output').slice(0, 300)}` };
+  }
+  let results;
+  try { results = JSON.parse(out); } catch {
+    return { name: 'JS Lint', ok: false, detail: `ESLint-Output nicht parsebar: ${String(out).slice(0, 300)}` };
+  }
   const problems = [];
   for (const r of results) {
     for (const m of r.messages) {
@@ -291,7 +322,7 @@ function checkJsLint(files) {
     }
   }
   return problems.length
-    ? { name: 'JS Lint', ok: false, detail: problems.join('\n') }
+    ? { name: 'JS Lint', ok: false, detail: capProblems(problems) }
     : { name: 'JS Lint', ok: true, detail: `0 Fehler (${targets.length} Datei(en))` };
 }
 
@@ -302,15 +333,21 @@ function checkCssLint(files) {
     .map((f) => f.filename)
     .filter((f) => fs.existsSync(path.join(REPO_DIR, f)));
   if (!targets.length) return { name: 'CSS Lint', ok: true, detail: 'Keine geänderten CSS-Dateien' };
-  let out;
+  let out; let execErr = null;
   try {
-    out = execFileSync('npx', ['stylelint', ...targets, '--ignore-path', '/dev/null', '-f', 'json'],
-      { cwd: REPO_DIR, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    out = execFileSync('npx', ['--no-install', 'stylelint', ...targets, '--ignore-path', '/dev/null', '-f', 'json'],
+      { cwd: REPO_DIR, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 180000 });
   } catch (e) {
-    out = e.stdout || '[]';
+    // Stylelint schreibt den JSON-Report bei Findings teils auf stderr (ältere Versionen: stdout)
+    out = e.stdout && String(e.stdout).trim() ? e.stdout : e.stderr; execErr = e;
   }
-  let results = [];
-  try { results = JSON.parse(out); } catch { /* ignore */ }
+  if (!out || !String(out).trim()) {
+    return { name: 'CSS Lint', ok: false, detail: `Stylelint konnte nicht ausgeführt werden: ${String(execErr && execErr.message || 'kein Output').slice(0, 300)}` };
+  }
+  let results;
+  try { results = JSON.parse(out); } catch {
+    return { name: 'CSS Lint', ok: false, detail: `Stylelint-Output nicht parsebar: ${String(out).slice(0, 300)}` };
+  }
   const problems = [];
   for (const r of results) {
     for (const w of r.warnings || []) {
@@ -319,7 +356,7 @@ function checkCssLint(files) {
     }
   }
   return problems.length
-    ? { name: 'CSS Lint', ok: false, detail: problems.join('\n') }
+    ? { name: 'CSS Lint', ok: false, detail: capProblems(problems) }
     : { name: 'CSS Lint', ok: true, detail: `0 Fehler (${targets.length} Datei(en))` };
 }
 
@@ -346,7 +383,7 @@ async function checkPlaceholderKeys(files, pr, exceptions) {
   const known = new Set();
   for (const pf of PLACEHOLDER_FILES) {
     try {
-      const res = await fetch(`${base}/de/de/placeholders/${pf}`);
+      const res = await fetch(`${base}/de/de/placeholders/${pf}`, { signal: AbortSignal.timeout(10000) });
       if (res.ok) {
         const json = await res.json();
         const rows = json.data || json;
@@ -375,12 +412,15 @@ function checkUnitTests(files) {
     return { name: 'Unit Tests', ok: true, skipped: true, detail: note };
   }
   try {
-    execFileSync('npx', ['jest', ...specs], {
+    execFileSync('npx', ['--no-install', 'jest', ...specs], {
       cwd: REPO_DIR, encoding: 'utf8', env: { ...process.env, NODE_OPTIONS: '--experimental-vm-modules' },
+      timeout: 300000, killSignal: 'SIGKILL',
     });
     return { name: 'Unit Tests', ok: true, detail: `${specs.length} Test-Datei(en) bestanden` };
   } catch (e) {
-    return { name: 'Unit Tests', ok: false, detail: (e.stdout || e.message || '').slice(-1500) };
+    // Timeout (Endlos-Test) soll den Check failen, nicht den ganzen Runner-Lauf killen
+    const why = e.signal === 'SIGKILL' ? 'Timeout (300s) — Test hängt?\n' : '';
+    return { name: 'Unit Tests', ok: false, detail: (why + (e.stdout || e.message || '')).slice(-1500) };
   }
 }
 
@@ -585,7 +625,8 @@ function checkVisualTests(files) {
 
 /** 8 — Merge Freshness: Commits hinter Base-Branch. */
 function checkMergeFreshness() {
-  const countStr = git(`rev-list --count origin/${BRANCH}..origin/${BASE_BRANCH}`);
+  // Range zählt Commits in BASE, die dem Branch fehlen (= "behind").
+  const countStr = git('rev-list', '--count', `origin/${BRANCH}..origin/${BASE_BRANCH}`);
   const behind = parseInt(countStr, 10);
   if (Number.isNaN(behind)) return { name: 'Merge Freshness', ok: true, detail: 'nicht ermittelbar' };
   if (behind > MERGE_FRESHNESS_FAIL) return { name: 'Merge Freshness', ok: false, detail: `Branch ist ${behind} Commits hinter ${BASE_BRANCH} (bitte rebasen)` };
@@ -651,24 +692,39 @@ function buildComment(results) {
   return body;
 }
 
+const REPORT_MARKER = '<!-- hermes-work:report -->';
+
 async function postComment(body) {
+  body = `${REPORT_MARKER}\n${body}`;
   if (DRY_RUN) {
     console.log('\n===== DRY RUN — Kommentar würde gepostet =====\n');
     console.log(body);
     console.log('\n===== /DRY RUN =====');
     return;
   }
-  const res = await fetch(`https://api.github.com/repos/${REPO}/issues/${PR_NUMBER}/comments`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${TOKEN}`,
-      Accept: 'application/vnd.github+json',
-      'User-Agent': 'jumo-testing-runner',
-    },
+  const headers = {
+    Authorization: `Bearer ${TOKEN}`,
+    Accept: 'application/vnd.github+json',
+    'User-Agent': 'jumo-testing-runner',
+  };
+  // Update-in-place: bestehenden Report-Kommentar (Marker) PATCHen statt bei
+  // jedem synchronize-Push einen neuen zu posten.
+  let existingId = null;
+  try {
+    const comments = await ghApi(`/repos/${REPO}/issues/${PR_NUMBER}/comments?per_page=100`);
+    const prev = comments.find((c) => (c.body || '').includes(REPORT_MARKER));
+    if (prev) existingId = prev.id;
+  } catch { /* Suche fehlgeschlagen -> neu posten */ }
+  const url = existingId
+    ? `https://api.github.com/repos/${REPO}/issues/comments/${existingId}`
+    : `https://api.github.com/repos/${REPO}/issues/${PR_NUMBER}/comments`;
+  const res = await fetch(url, {
+    method: existingId ? 'PATCH' : 'POST',
+    headers,
     body: JSON.stringify({ body }),
   });
   if (!res.ok) throw new Error(`Kommentar posten fehlgeschlagen: ${res.status} ${await res.text()}`);
-  console.log('=== KOMMENTAR GEPOSTET ===');
+  console.log(existingId ? '=== KOMMENTAR AKTUALISIERT ===' : '=== KOMMENTAR GEPOSTET ===');
 }
 
 // ---------------------------------------------------------------------------
