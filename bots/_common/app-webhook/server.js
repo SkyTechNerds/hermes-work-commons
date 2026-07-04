@@ -205,6 +205,29 @@ async function handleReviewComment(payload) {
   if (/geantwortet/.test(out.out)) notifyDiscord(`\ud83e\uddab **${repo}#${pr}** \u00b7 auf Review-Reply geantwortet\n<https://github.com/${repo}/pull/${pr}>`);
 }
 
+// Q&A auf Top-Level-PR-Kommentare: antwortet NUR bei Mention @the-codemole
+// (sonst würde der Bot in jede menschliche Unterhaltung grätschen).
+async function handleIssueComment(payload) {
+  const repo = payload.repository.full_name;
+  if (!ALLOWED_OWNERS.includes((repo || '').split('/')[0])) { log(`skip ${repo}: owner nicht in Whitelist`); return; }
+  const c = payload.comment || {};
+  const pr = payload.issue && payload.issue.number;
+  const installationId = payload.installation && payload.installation.id;
+  if (!pr || !installationId) return;
+  if (c.user && c.user.type === 'Bot') { log(`skip comment ${repo}#${pr}: Bot-Autor (Loop-Schutz)`); return; }
+  if (!/@the-codemole/i.test(c.body || '')) { log(`skip comment ${repo}#${pr}: keine Mention`); return; }
+
+  let token;
+  try { token = await installationToken(installationId); }
+  catch (e) { log(`comment token-fail ${repo}#${pr}: ${e.message}`); return; }
+
+  log(`comment ${repo}#${pr}: Mention von ${c.user && c.user.login} (comment ${c.id})`);
+  const out = await run(path.join(BOTS_DIR, '_common', 'ai-comment.sh'),
+    [repo, String(pr), String(c.id)], token, projectForRepo(repo));
+  log(`ai-comment ${repo}#${pr}: ${out.out.slice(-120).replace(/\n/g, ' ')}`);
+  if (/geantwortet/.test(out.out)) notifyDiscord(`\ud83e\uddab **${repo}#${pr}** \u00b7 Frage per Mention beantwortet\n<https://github.com/${repo}/pull/${pr}>`);
+}
+
 // Lighthouse on-demand: Label `lighthouse` an den PR → schwerer Zwei-Pass-Lauf,
 // Ergebnis als eigener Kommentar. Läuft bewusst NICHT bei jedem Push (zu langsam).
 async function handleLighthouse(payload) {
@@ -284,6 +307,9 @@ const server = http.createServer((req, res) => {
       handleLighthouse(payload).catch(e => log(`lighthouse-error: ${e.message}`));
     } else if (event === 'pull_request_review_comment' && payload.action === 'created') {
       handleReviewComment(payload).catch(e => log(`reply-error: ${e.message}`));
+    } else if (event === 'issue_comment' && payload.action === 'created' &&
+               payload.issue && payload.issue.pull_request) {
+      handleIssueComment(payload).catch(e => log(`comment-error: ${e.message}`));
     } else {
       log(`ignored event=${event} action=${payload.action || '-'}`);
     }
