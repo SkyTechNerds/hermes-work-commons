@@ -12,6 +12,7 @@ source = "auto" | "<config-dateiname>"
 """
 import sys
 import os
+import re
 import json
 
 try:
@@ -21,12 +22,21 @@ except ImportError:
 
 # Profil -> Check-Bündel (universell kommt immer dazu)
 PROFILES = {
-    "ha-config":    ["yamllint", "ha-validate", "includes", "diff-size"],
-    "ha-component": ["python-syntax", "manifest", "hacs", "translations", "diff-size"],
+    "ha-config":    ["yamllint", "ha-validate", "includes", "secret-refs", "duplicate-ids", "diff-size"],
+    "ha-component": ["python-syntax", "ruff", "manifest", "hacs", "translations", "json-valid", "diff-size"],
     "aem-eds":      ["eslint", "aem-block-validator", "visual", "diff-size"],
     "generic":      ["diff-size"],
 }
-UNIVERSAL = ["secret-scan", "ai-review"]
+UNIVERSAL = ["secret-scan", "conflict-markers", "sensitive-files", "ai-review"]
+
+# Check-Namen sind Datei-Bausteine (bots/_common/checks/<name>.sh) — Namen aus der
+# PR-eigenen .codemole.yml MÜSSEN validiert werden, sonst ist "../../evil" ein
+# Pfad-Traversal und führt beliebigen PR-Code auf dem Runner aus.
+SAFE_CHECK_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+
+
+def sanitize_names(names):
+    return [str(c) for c in names if SAFE_CHECK_NAME.fullmatch(str(c))]
 CONFIG_NAMES = (".codemole.yml", ".codemole.yaml",
                 ".github/codemole.yml", ".github/codemole.yaml")
 
@@ -67,14 +77,14 @@ def main():
     if cfg is not None:
         source = cfgfile
         if cfg.get("checks"):
-            allow = list(cfg["checks"])           # explizite Allowlist
+            allow = sanitize_names(cfg["checks"])  # explizite Allowlist (validierte Namen)
             checks = list(allow)
             profile = cfg.get("profile") or "custom"
         else:
             allow = []
             profile = cfg.get("profile") or detect(repo_dir)
             checks = PROFILES.get(profile, PROFILES["generic"]) + UNIVERSAL
-        disabled = cfg.get("disable") or []
+        disabled = sanitize_names(cfg.get("disable") or [])
         ignore = cfg.get("ignore") or []
         options = {k: v for k, v in cfg.items()
                    if k not in ("profile", "checks", "disable", "ignore")}
@@ -86,6 +96,8 @@ def main():
         disabled, ignore, options = [], [], {}
 
     checks = [c for c in checks if c not in disabled]
+    if not SAFE_CHECK_NAME.fullmatch(str(profile)):
+        profile = "custom"  # Profil-Name landet im Report-Markdown — nie roh übernehmen
     print(json.dumps({
         "profile": profile, "source": source, "checks": checks,
         "allow": allow, "disabled": disabled, "ignore": ignore, "options": options,
