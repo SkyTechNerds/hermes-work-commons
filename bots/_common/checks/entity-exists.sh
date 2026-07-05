@@ -67,7 +67,7 @@ ENT_RE = re.compile(r'\b((?:%s)\.[a-z0-9_]+)\b' % DOMAINS)
 
 try:
     req = urllib.request.Request(os.environ["HA_URL"].rstrip("/") + "/api/states",
-                                 headers={"Authorization": "Bearer " + os.environ["HA_TOKEN"]})
+                                 headers={"Authorization": "Bearer " + os.environ["HA_TOKEN"], "User-Agent": "CodeMole/1.0"})
     with urllib.request.urlopen(req, timeout=10) as r:
         live = {s["entity_id"] for s in json.load(r)}
 except Exception as e:
