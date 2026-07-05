@@ -1,11 +1,27 @@
 #!/bin/bash
 # hermes-work — detect-lang.sh <owner/repo> <pr>
-# Erkennt die PR-Sprache (Titel + Beschreibung) und gibt "de" oder "en" aus.
-# Heuristik: Umlaute/ß zählen stark für Deutsch; sonst Stopwort-Mehrheit. Default: de.
-# Env: GH_TOKEN/GITHUB_TOKEN (für gh api). Fehler -> "de" (fail-safe, bisheriges Verhalten).
+# Bestimmt die Ausgabesprache ("de" oder "en"):
+#   1) expliziter Override in .codemole.yml (`lang: de|en`) — hat Vorrang
+#   2) sonst Heuristik über PR-Titel + Beschreibung (Umlaute stark, Stopwort-Mehrheit)
+# Env: REPO_DIR (für den .codemole.yml-Override), GH_TOKEN/GITHUB_TOKEN (gh api).
+# Default/Fehler -> "de" (fail-safe).
 set -uo pipefail
 REPO="${1:-}"; PR="${2:-}"
 [ -z "$REPO" ] || [ -z "$PR" ] && { echo de; exit 0; }
+
+# 1) .codemole.yml-Override (lang: de|en) — deterministisch, schlägt die Heuristik
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+OV="$(python3 "$DIR/resolve-profile.py" "${REPO_DIR:-.}" "$REPO" 2>/dev/null | python3 -c '
+import sys, json
+try:
+    o = json.load(sys.stdin).get("options") or {}
+except Exception:
+    o = {}
+v = str(o.get("lang", "")).strip().lower()
+print(v if v in ("de", "en") else "")' 2>/dev/null)"
+[ -n "$OV" ] && { echo "$OV"; exit 0; }
+
+# 2) Heuristik auf PR-Titel + Beschreibung
 TXT="$(gh api "repos/$REPO/pulls/$PR" --jq '(.title // "") + " " + (.body // "")' 2>/dev/null | head -c 4000)"
 [ -z "$TXT" ] && { echo de; exit 0; }
 printf '%s' "$TXT" | python3 -c '
