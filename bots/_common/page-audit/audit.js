@@ -33,6 +33,12 @@ const TOKEN = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
 const DRY = process.env.DRY_RUN === '1';
 const MAX_PAGES = 5;
 const MARKER = '<!-- codemole:page-audit -->';
+function detectLang() {
+  try {
+    return execFileSync('bash', [path.join(__dirname, '..', 'detect-lang.sh'), REPO, String(PR)], { encoding: 'utf8' }).trim() === 'en' ? 'en' : 'de';
+  } catch { return 'de'; }
+}
+const L = detectLang();
 
 function loadConfig() {
   if (process.env.PAGE_AUDIT_CONFIG) {
@@ -130,7 +136,7 @@ async function upsertComment(body) {
   for (const r of results) {
     if (r.branchRes.error) {
       totalNew += 1;
-      sections.push(`**${r.page}** — ❌ Branch-Preview lädt nicht (${r.branchRes.error})`);
+      sections.push(L === 'en' ? `**${r.page}** — ❌ branch preview fails to load (${r.branchRes.error})` : `**${r.page}** — ❌ Branch-Preview lädt nicht (${r.branchRes.error})`);
       continue;
     }
     const baseKeys = new Set(r.baseRes.error ? [] : r.baseRes.violations.map((v) => v.key));
@@ -144,7 +150,7 @@ async function upsertComment(body) {
     }
     totalNew += fresh.length;
     if (byRule.size) {
-      const noBase = r.baseRes.error ? ' *(kein Base-Vergleich möglich — alle Findings gezeigt)*' : '';
+      const noBase = r.baseRes.error ? (L === 'en' ? ' *(no base comparison possible — showing all findings)*' : ' *(kein Base-Vergleich möglich — alle Findings gezeigt)*') : '';
       const t = r.branchRes.timing;
       const lines = [...byRule.values()].map((g) =>
         `- ${g.impact === 'critical' || g.impact === 'serious' ? '⚠️' : '•'} \`${g.id}\` (${g.impact}): ${g.count} Element(e) — ${g.help}. z. B. \`${g.targets[0]}\``);
@@ -155,7 +161,11 @@ async function upsertComment(body) {
   console.log(`PAGE-AUDIT: ${totalNew} neue Finding(s)`);
   if (!totalNew) return;
 
-  const body = `${MARKER}\n## 🔎 Page-Audit\n${totalNew} neue Finding(s) gegenüber \`${BASE}\` (axe-core · WCAG 2.1 A/AA + Best Practice · nur Verschlechterungen):\n\n${sections.join('\n\n')}\n\n<sub>CodeMole page-audit · Zwei-Pass base↔branch · Timing informativ</sub>`;
+  const head = L === 'en'
+    ? `${totalNew} new finding(s) compared to \`${BASE}\` (axe-core · WCAG 2.1 A/AA + best practice · regressions only)`
+    : `${totalNew} neue Finding(s) gegenüber \`${BASE}\` (axe-core · WCAG 2.1 A/AA + Best Practice · nur Verschlechterungen)`;
+  const foot = L === 'en' ? 'CodeMole page-audit · two-pass base↔branch · timing informational' : 'CodeMole page-audit · Zwei-Pass base↔branch · Timing informativ';
+  const body = `${MARKER}\n## 🔎 Page-Audit\n${head}:\n\n${sections.join('\n\n')}\n\n<sub>${foot}</sub>`;
   if (DRY) { console.log('\n' + body); return; }
   if (!TOKEN) { console.log('PAGE-AUDIT: kein Token — nicht gepostet'); return; }
   await upsertComment(body);

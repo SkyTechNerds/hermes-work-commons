@@ -1,4 +1,5 @@
 #!/bin/bash
+t() { if [ "${CODEMOLE_LANG:-de}" = "en" ]; then printf %s "$2"; else printf %s "$1"; fi; }
 # Check-Modul: secret-scan — Klartext-Secrets in NEU HINZUGEFÜGTEN Zeilen.
 # Env: BASE_SHA, HEAD_SHA, DIFF_FILES_FILE (optional, für ignore). cwd=REPO_DIR.
 #
@@ -18,7 +19,7 @@ if [ -n "${DIFF_FILES_FILE:-}" ] && [ -s "${DIFF_FILES_FILE:-}" ]; then
 fi
 
 ADDED="$(git diff --unified=0 "$BASE_SHA" "$HEAD_SHA" "${PATHSPEC[@]}" | grep -E '^\+' | grep -vE '^\+\+\+' || true)"
-[ -z "$ADDED" ] && { emit pass "Keine hinzugefügten Zeilen zu scannen"; exit 0; }
+[ -z "$ADDED" ] && { emit pass "$(t "Keine hinzugefügten Zeilen zu scannen" "No added lines to scan")"; exit 0; }
 
 ASSIGN='(password|passwd|api_key|apikey|access_key|auth_token|token|secret|client_secret)[[:space:]]*[:=][[:space:]]*'
 # quoted (>=6 Zeichen) oder unquoted (>=6 Zeichen); Templates/Referenzen/Platzhalter raus
@@ -33,7 +34,7 @@ HITS_KNOWN="$(printf '%s\n' "$ADDED" \
 
 N=$(( $(printf '%s' "$HITS_ASSIGN" | grep -c .) + $(printf '%s' "$HITS_KNOWN" | grep -c .) ))
 if [ "$N" -eq 0 ]; then
-  emit pass "Keine Klartext-Secrets in den hinzugefügten Zeilen"
+  emit pass "$(t "Keine Klartext-Secrets in den hinzugefügten Zeilen" "No plaintext secrets in the added lines")"
 else
-  emit fail "$N mögliche Klartext-Secrets in hinzugefügten Zeilen"
+  emit fail "$(t "$N mögliche Klartext-Secrets in hinzugefügten Zeilen" "$N possible plaintext secrets in added lines")"
 fi

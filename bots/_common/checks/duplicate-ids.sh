@@ -1,4 +1,5 @@
 #!/bin/bash
+t() { if [ "${CODEMOLE_LANG:-de}" = "en" ]; then printf %s "$2"; else printf %s "$1"; fi; }
 # Check-Modul: duplicate-ids — doppelte Automation-IDs (Listen-Einträge `- id: X`).
 # Häufiger Copy-Paste-Fehler; HA überschreibt dann still eine der Automationen.
 # Warnt nur, wenn eine im PR hinzugefügte ID betroffen ist. Env: BASE_SHA, HEAD_SHA, DIFF_FILES_FILE.
@@ -16,7 +17,7 @@ mapfile -t NEW_IDS < <(git diff --unified=0 "$BASE_SHA" "$HEAD_SHA" "${PATHSPEC[
   | sed -E "s/^\+[[:space:]]*-[[:space:]]+id:[[:space:]]*['\"]?([A-Za-z0-9_.-]+)['\"]?.*/\1/" \
   | grep -E '^[A-Za-z0-9_.-]+$' \
   | sort -u || true)
-[ "${#NEW_IDS[@]}" -eq 0 ] && { emit skip "Keine neuen Automation-IDs im Diff"; exit 0; }
+[ "${#NEW_IDS[@]}" -eq 0 ] && { emit skip "$(t "Keine neuen Automation-IDs im Diff" "No new automation IDs in the diff")"; exit 0; }
 DUP=""
 for id in "${NEW_IDS[@]}"; do
   N=$(grep -rhE "^[[:space:]]*-[[:space:]]+id:[[:space:]]*['\"]?${id}['\"]?([[:space:]]|$)" \
@@ -24,7 +25,7 @@ for id in "${NEW_IDS[@]}"; do
   [ "$N" -gt 1 ] && DUP="$DUP \`$id\`(${N}×)"
 done
 if [ -n "$DUP" ]; then
-  emit warn "Automation-ID(s) mehrfach vergeben:$DUP"
+  emit warn "$(t "Automation-ID(s) mehrfach vergeben:$DUP" "Duplicate automation ID(s):$DUP")"
 else
-  emit pass "${#NEW_IDS[@]} neue Automation-ID(s) — alle eindeutig"
+  emit pass "$(t "${#NEW_IDS[@]} neue Automation-ID(s) — alle eindeutig" "${#NEW_IDS[@]} new automation ID(s) — all unique")"
 fi

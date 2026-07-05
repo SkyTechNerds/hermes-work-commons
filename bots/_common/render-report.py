@@ -42,7 +42,9 @@ def status_line(c):
 
 def render(checks, branch="", base=""):
     lines = [status_line(c) for c in checks]
-    body = "## 🧪 Automatischer PR-Test\n"
+    lang = os.environ.get("CODEMOLE_LANG", "de")
+    title = "Automated PR Checks" if lang == "en" else "Automatischer PR-Test"
+    body = f"## 🧪 {title}\n"
     prof = os.environ.get("CODEMOLE_PROFILE_LINE", "")
     if prof:
         body += prof + "\n"
@@ -54,7 +56,9 @@ def render(checks, branch="", base=""):
     ]
     if details:
         body += "\n\n---\n\n" + "\n\n".join(details)
-    body += f"\n\n<sub>hermes-work · branch `{branch}` · base `{base}` · [Was prüfen diese Tests?]({CHECK_DOCS})</sub>"
+    docs = CHECK_DOCS + ("en/" if lang == "en" else "")
+    what = "What do these checks do?" if lang == "en" else "Was prüfen diese Tests?"
+    body += f"\n\n<sub>hermes-work · branch `{branch}` · base `{base}` · [{what}]({docs})</sub>"
     return body
 
 

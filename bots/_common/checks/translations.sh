@@ -1,10 +1,11 @@
 #!/bin/bash
+t() { if [ "${CODEMOLE_LANG:-de}" = "en" ]; then printf %s "$2"; else printf %s "$1"; fi; }
 # Check-Modul: translations — en.json-Pflicht + Key-SET-Konsistenz (nicht nur Anzahl). cwd=REPO_DIR.
 emit() { python3 -c "import json,sys;print(json.dumps({'name':'translations','status':sys.argv[1],'message':sys.argv[2]}))" "$1" "$2"; }
 TDIR=$(find custom_components -maxdepth 2 -type d -name translations 2>/dev/null | head -1)
-[ -z "$TDIR" ] && { emit skip "Kein translations/-Verzeichnis"; exit 0; }
+[ -z "$TDIR" ] && { emit skip "$(t "Kein translations/-Verzeichnis" "No translations/ directory")"; exit 0; }
 EN="$TDIR/en.json"
-[ -f "$EN" ] || { emit warn "en.json fehlt - keine Pflicht-Sprache"; exit 0; }
+[ -f "$EN" ] || { emit warn "$(t "en.json fehlt - keine Pflicht-Sprache" "en.json missing - it is the required language")"; exit 0; }
 RESULT="$(TDIR="$TDIR" python3 <<'PY'
 import json, os, glob
 tdir = os.environ["TDIR"]
@@ -49,5 +50,5 @@ case "$RESULT" in
   OK*)       emit pass "${RESULT#OK }" ;;
   MISMATCH*) emit warn "Translations-Key-Mismatch: ${RESULT#MISMATCH }" ;;
   BROKEN*)   emit fail "${RESULT#BROKEN }" ;;
-  *)         emit warn "translations-Check nicht auswertbar" ;;
+  *)         emit warn "$(t "translations-Check nicht auswertbar" "translations check could not be evaluated")" ;;
 esac

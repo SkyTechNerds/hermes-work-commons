@@ -1,4 +1,5 @@
 #!/bin/bash
+t() { if [ "${CODEMOLE_LANG:-de}" = "en" ]; then printf %s "$2"; else printf %s "$1"; fi; }
 # Check-Modul: ha-validate — HA-Config-Validierung, ZWEI-PASS (Base vs Branch).
 # check_config auf einem nackten Checkout meldet immer Umgebungs-Bestandsfehler
 # (Unknown device = .storage fehlt, fehlende Systemlibs, Alt-Configs). Deshalb wird
@@ -12,7 +13,7 @@ emit() { python3 -c "import json,sys;print(json.dumps({'name':'ha-validate','sta
 HASS_BIN="${HASS_BIN:-}"
 [ -z "$HASS_BIN" ] && [ -x /opt/ha-venv/bin/hass ] && HASS_BIN=/opt/ha-venv/bin/hass
 [ -z "$HASS_BIN" ] && HASS_BIN="$(command -v hass || true)"
-[ -z "$HASS_BIN" ] && { emit skip "hass-CLI nicht installiert"; exit 0; }
+[ -z "$HASS_BIN" ] && { emit skip "$(t "hass-CLI nicht installiert" "hass CLI not installed")"; exit 0; }
 VER=$("$HASS_BIN" --version 2>/dev/null)
 
 # check_config-Lauf -> normalisierte Fehlerzeilen (ANSI raus, nur Fehler, dedupe)
@@ -55,13 +56,13 @@ print("\n".join(out[:12]))
 BASE_N=$(printf '%s' "$BASE_ERRS" | grep -c . || true)
 if [ -n "$NEW" ]; then
   N=$(printf '%s' "$NEW" | grep -c .)
-  MSG="$N neue(r) Validierungsfehler (hass $VER, $BASE_N Bestandsfehler der Base ignoriert):
+  MSG="$(t "$N neue(r) Validierungsfehler (hass $VER, $BASE_N Bestandsfehler der Base ignoriert):" "$N new validation error(s) (hass $VER, $BASE_N pre-existing base errors ignored):")
 $NEW"
   python3 -c "import json,sys;print(json.dumps({'name':'ha-validate','status':'fail','message':sys.argv[1]}))" "$MSG"
 else
   if [ "$BASE_N" -gt 0 ]; then
-    emit pass "Keine neuen Validierungsfehler (hass $VER; $BASE_N Bestandsfehler der Base unverändert)"
+    emit pass "$(t "Keine neuen Validierungsfehler (hass $VER; $BASE_N Bestandsfehler der Base unverändert)" "No new validation errors (hass $VER; $BASE_N pre-existing base errors unchanged)")"
   else
-    emit pass "HA-Config valide (hass $VER)"
+    emit pass "$(t "HA-Config valide (hass $VER)" "HA config valid (hass $VER)")"
   fi
 fi

@@ -25,6 +25,12 @@ const TOKEN = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
 const DRY = process.env.DRY_RUN === '1';
 const MARKER = '<!-- codemole:lighthouse -->';
 const CATS = ['performance', 'accessibility', 'best-practices', 'seo'];
+function detectLang() {
+  try {
+    return execFileSync('bash', [path.join(__dirname, '..', 'detect-lang.sh'), REPO, String(PR)], { encoding: 'utf8' }).trim() === 'en' ? 'en' : 'de';
+  } catch { return 'de'; }
+}
+const L = detectLang();
 
 // Playwright-Chromium als Chrome für Lighthouse
 function chromePath() {
@@ -107,8 +113,10 @@ async function upsertComment(body) {
     rows.push(`| \`${p}\` | ${dif(b.performance, n.performance)} | ${dif(b.accessibility, n.accessibility)} | ${dif(b['best-practices'], n['best-practices'])} | ${dif(b.seo, n.seo)} | LCP ${n._lcp} ms · CLS ${n._cls} |`);
   }
 
-  const verdict = worst < -2 ? `⚠️ Verschlechterung bis zu ${worst} Punkte gegenüber \`${BASE}\`` : `✅ keine relevante Verschlechterung gegenüber \`${BASE}\``;
-  const body = `${MARKER}\n## ⚡ Lighthouse\n${verdict}\n\n| Seite | Perf | A11y | Best-P. | SEO | Metriken (Branch) |\n|---|---|---|---|---|---|\n${rows.join('\n')}\n\n<sub>CodeMole lighthouse · on-demand via Label \`lighthouse\` · Werte = Branch (Δ zu Base)</sub>`;
+  const verdict = L === 'en'
+    ? (worst < -2 ? `⚠️ regression of up to ${worst} points vs \`${BASE}\`` : `✅ no relevant regression vs \`${BASE}\``)
+    : (worst < -2 ? `⚠️ Verschlechterung bis zu ${worst} Punkte gegenüber \`${BASE}\`` : `✅ keine relevante Verschlechterung gegenüber \`${BASE}\``);
+  const body = `${MARKER}\n## ⚡ Lighthouse\n${verdict}\n\n| ${L === 'en' ? 'Page' : 'Seite'} | Perf | A11y | Best-P. | SEO | ${L === 'en' ? 'Metrics (branch)' : 'Metriken (Branch)'} |\n|---|---|---|---|---|---|\n${rows.join('\n')}\n\n<sub>${L === 'en' ? 'CodeMole lighthouse · on-demand via label `lighthouse` · values = branch (Δ vs base)' : 'CodeMole lighthouse · on-demand via Label `lighthouse` · Werte = Branch (Δ zu Base)'}</sub>`;
   console.log(`LIGHTHOUSE: fertig (${pages.length} Seite(n), worst Δ ${worst})`);
   if (DRY) { console.log('\n' + body); return; }
   if (!TOKEN) { console.log('LIGHTHOUSE: kein Token — nicht gepostet'); return; }

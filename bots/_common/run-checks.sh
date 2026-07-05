@@ -73,12 +73,20 @@ export BASE_SHA="$(git merge-base refs/hermes/base "$HEAD_SHA" 2>/dev/null || gi
 export DIFF_FILES="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
 [ -z "$DIFF_FILES" ] && { echo "EMPTY_DIFF" >&2; exit 0; }
 
+# PR-Sprache erkennen (de/en) — steuert Report- und Check-Meldungen
+export CODEMOLE_LANG="$(bash "$COMMON/detect-lang.sh" "$REPO" "$PR" 2>/dev/null || echo de)"
+
 RESOLVE="$(python3 "$COMMON/resolve-profile.py" "$REPO_DIR" "$REPO" 2>/dev/null)"
 PROFILE="$(printf '%s' "$RESOLVE" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("profile","generic"))' 2>/dev/null || echo generic)"
 PSOURCE="$(printf '%s' "$RESOLVE" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("source","auto"))' 2>/dev/null || echo auto)"
 CHECKS="$(printf '%s' "$RESOLVE" | python3 -c 'import sys,json;print(" ".join(json.load(sys.stdin).get("checks",[])))' 2>/dev/null)"
-if [ "$PSOURCE" = "auto" ]; then SRCTXT="automatisch erkannt"; else SRCTXT="aus \`$PSOURCE\`"; fi
-export CODEMOLE_PROFILE_LINE="Profil: \`$PROFILE\` · $SRCTXT · [⚙ Konfigurierbar](https://web.skycryer.com/codemole/docs/#config)"
+if [ "$CODEMOLE_LANG" = "en" ]; then
+  if [ "$PSOURCE" = "auto" ]; then SRCTXT="auto-detected"; else SRCTXT="from \`$PSOURCE\`"; fi
+  export CODEMOLE_PROFILE_LINE="Profile: \`$PROFILE\` · $SRCTXT · [⚙ Configurable](https://web.skycryer.com/codemole/docs/en/#config)"
+else
+  if [ "$PSOURCE" = "auto" ]; then SRCTXT="automatisch erkannt"; else SRCTXT="aus \`$PSOURCE\`"; fi
+  export CODEMOLE_PROFILE_LINE="Profil: \`$PROFILE\` · $SRCTXT · [⚙ Konfigurierbar](https://web.skycryer.com/codemole/docs/#config)"
+fi
 
 # aem-eds (z.B. JUMO) hat einen eigenen Node-Runner run.js (9 Checks, zu komplex für Bash-Module).
 # Delegieren: run.js löst Profil/Header selbst auf, fährt die Checks und postet (mode=post).

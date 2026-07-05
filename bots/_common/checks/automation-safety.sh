@@ -1,4 +1,5 @@
 #!/bin/bash
+t() { if [ "${CODEMOLE_LANG:-de}" = "en" ]; then printf %s "$2"; else printf %s "$1"; fi; }
 # Check-Modul: automation-safety — HA-Automations-Fallen in PR-geänderten Zeilen.
 #   1) State-Trigger mit `to:` aber ohne `from:`/`not_from:` → feuert beim HA-Neustart
 #      (Entity geht unavailable→on, Trigger sieht nur das `to:`). Bekannter Live-Bug.
@@ -6,7 +7,7 @@
 # Env: BASE_SHA, HEAD_SHA, DIFF_FILES. cwd=REPO_DIR.
 emit() { python3 -c "import json,sys;print(json.dumps({'name':'automation-safety','status':sys.argv[1],'message':sys.argv[2]}))" "$1" "$2"; }
 YAML_FILES=$(echo "$DIFF_FILES" | grep -E '\.(ya?ml)$' || true)
-[ -z "$YAML_FILES" ] && { emit skip "Keine YAML-Dateien im Diff"; exit 0; }
+[ -z "$YAML_FILES" ] && { emit skip "$(t "Keine YAML-Dateien im Diff" "No YAML files in the diff")"; exit 0; }
 
 OUT="$(YAML_FILES="$YAML_FILES" BASE_SHA="$BASE_SHA" HEAD_SHA="$HEAD_SHA" python3 <<'PY'
 import os, re, subprocess
@@ -62,7 +63,11 @@ for f in os.environ["YAML_FILES"].split():
             has_from = re.search(r'^\s*(from|not_from):\s*\S', text, re.M)
             touched = any(ln in changed for ln, _ in block)
             if has_to and not has_from and touched:
-                findings.append(f"{f}:{start + 1} State-Trigger mit `to:` ohne `from:` — feuert beim HA-Neustart (unavailable→on). `from:` ergänzen.")
+                L = os.environ.get("CODEMOLE_LANG", "de")
+                if L == "en":
+                    findings.append(f"{f}:{start + 1} state trigger with `to:` but no `from:` — fires on HA restart (unavailable→on). Add `from:`.")
+                else:
+                    findings.append(f"{f}:{start + 1} State-Trigger mit `to:` ohne `from:` — feuert beim HA-Neustart (unavailable→on). `from:` ergänzen.")
             i = j
         else:
             i += 1
@@ -70,17 +75,20 @@ for f in os.environ["YAML_FILES"].split():
     # --- 2) device_id in geänderten Zeilen
     for ln in sorted(changed):
         if ln <= len(lines) and re.match(r'^\s*-?\s*device_id:\s*\S', lines[ln - 1]) and not lines[ln - 1].lstrip().startswith("#"):
-            findings.append(f"{f}:{ln} `device_id:` statt `entity_id:` — Projekt-Konvention: entity_id verwenden (überlebt Geräte-Austausch).")
+            if os.environ.get("CODEMOLE_LANG", "de") == "en":
+                findings.append(f"{f}:{ln} `device_id:` instead of `entity_id:` — project convention: use entity_id (survives device replacement).")
+            else:
+                findings.append(f"{f}:{ln} `device_id:` statt `entity_id:` — Projekt-Konvention: entity_id verwenden (überlebt Geräte-Austausch).")
 
 for x in findings:
     print(x)
 PY
 )"
 if [ -z "$OUT" ]; then
-  emit pass "Keine Trigger-/Konventions-Probleme in den geänderten Zeilen"
+  emit pass "$(t "Keine Trigger-/Konventions-Probleme in den geänderten Zeilen" "No trigger/convention issues in the changed lines")"
 else
   N=$(echo "$OUT" | grep -c .)
-  MSG="$N Hinweis(e):
+  MSG="$(t "$N Hinweis(e):" "$N hint(s):")
 $OUT"
   python3 -c "import json,sys;print(json.dumps({'name':'automation-safety','status':'warn','message':sys.argv[1]}))" "$MSG"
 fi

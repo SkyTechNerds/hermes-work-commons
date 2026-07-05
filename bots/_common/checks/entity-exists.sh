@@ -1,4 +1,5 @@
 #!/bin/bash
+t() { if [ "${CODEMOLE_LANG:-de}" = "en" ]; then printf %s "$2"; else printf %s "$1"; fi; }
 # Check-Modul: entity-exists — referenzierte entity_ids in NEUEN Zeilen gegen die
 # Home-Assistant-Instanz prüfen (GET /api/states). Fängt Tippfehler in Entity-IDs.
 #
@@ -35,10 +36,10 @@ case "$HA_TOKEN_RAW" in
     if [ -f "$SECKEY" ]; then
       HA_TOKEN="$(printf '%s' "${HA_TOKEN_RAW#enc:v1:}" | base64 -d 2>/dev/null | \
         openssl pkeyutl -decrypt -inkey "$SECKEY" -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 2>/dev/null)"
-      [ -z "$HA_TOKEN" ] && { emit warn "entity-exists: ha_token konnte nicht entschlüsselt werden — Blob mit dem aktuellen Public Key neu erzeugen (Doku: Secrets)"; exit 0; }
+      [ -z "$HA_TOKEN" ] && { emit warn "$(t "entity-exists: ha_token konnte nicht entschlüsselt werden — Blob mit dem aktuellen Public Key neu erzeugen (Doku: Secrets)" "entity-exists: ha_token could not be decrypted — re-create the blob with the current public key (docs: Secrets)")"; exit 0; }
     fi ;;
   "") : ;;
-  *) emit warn "entity-exists: ha_token muss verschlüsselt sein (enc:v1:… via Browser-Tool, Doku: Secrets) — Klartext-Token werden ignoriert"; exit 0 ;;
+  *) emit warn "$(t "entity-exists: ha_token muss verschlüsselt sein (enc:v1:… via Browser-Tool, Doku: Secrets) — Klartext-Token werden ignoriert" "entity-exists: ha_token must be encrypted (enc:v1:… via the browser tool, docs: Secrets) — plaintext tokens are ignored")"; exit 0 ;;
 esac
 
 # Fallback: serverseitige Dateien (legacy)
@@ -46,12 +47,12 @@ esac
 [ -z "$HA_TOKEN" ] && [ -s /etc/hermes-work-app/ha-token ] && HA_TOKEN="$(cat /etc/hermes-work-app/ha-token)"
 
 if [ -z "$HA_URL" ] || [ -z "$HA_TOKEN" ]; then
-  emit skip "Optional — HA-Zugang nicht konfiguriert ([Anleitung](https://web.skycryer.com/codemole/docs/#secrets))"
+  emit skip "$(t "Optional — HA-Zugang nicht konfiguriert ([Anleitung](https://web.skycryer.com/codemole/docs/#secrets))" "Optional — HA access not configured ([guide](https://web.skycryer.com/codemole/docs/en/#secrets))")"
   exit 0
 fi
 
 YAML_FILES=$(echo "$DIFF_FILES" | grep -E '\.(ya?ml)$' || true)
-[ -z "$YAML_FILES" ] && { emit skip "Keine YAML-Dateien im Diff"; exit 0; }
+[ -z "$YAML_FILES" ] && { emit skip "$(t "Keine YAML-Dateien im Diff" "No YAML files in the diff")"; exit 0; }
 
 OUT="$(YAML_FILES="$YAML_FILES" BASE_SHA="$BASE_SHA" HEAD_SHA="$HEAD_SHA" \
       HA_URL="$HA_URL" HA_TOKEN="$HA_TOKEN" python3 <<'PY'
@@ -92,7 +93,8 @@ for f in os.environ["YAML_FILES"].split():
             for ent in ENT_RE.findall(code):
                 if ent not in live and ent not in seen:
                     seen.add(ent)
-                    missing.append(f"{f}:{lineno} `{ent}` existiert nicht in der HA-Instanz")
+                    suffix = "does not exist in the HA instance" if os.environ.get("CODEMOLE_LANG", "de") == "en" else "existiert nicht in der HA-Instanz"
+                    missing.append(f"{f}:{lineno} `{ent}` {suffix}")
 
 for x in missing:
     print(x)
@@ -100,12 +102,12 @@ PY
 )"
 case "$OUT" in
   __HA_UNREACHABLE__*)
-    emit skip "HA-Instanz nicht erreichbar — Entity-Prüfung übersprungen"; exit 0 ;;
+    emit skip "$(t "HA-Instanz nicht erreichbar — Entity-Prüfung übersprungen" "HA instance not reachable — entity check skipped")"; exit 0 ;;
 esac
 if [ -z "$OUT" ]; then
-  emit pass "Alle referenzierten Entities existieren in der HA-Instanz"
+  emit pass "$(t "Alle referenzierten Entities existieren in der HA-Instanz" "All referenced entities exist in the HA instance")"
 else
   N=$(echo "$OUT" | grep -c .)
-  python3 -c "import json,sys;print(json.dumps({'name':'entity-exists','status':'warn','message':sys.argv[1]}))" "$N unbekannte Entity/Entities:
+  python3 -c "import json,sys;print(json.dumps({'name':'entity-exists','status':'warn','message':sys.argv[1]}))" "$(t "$N unbekannte Entity/Entities:" "$N unknown entity/entities:")
 $OUT"
 fi
