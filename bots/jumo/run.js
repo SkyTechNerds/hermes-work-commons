@@ -685,10 +685,12 @@ function checkStaticScans(files, exceptions) {
 // Kommentar bauen + posten
 // ---------------------------------------------------------------------------
 
+const CHECK_DOCS = 'https://web.skycryer.com/codemole/docs/checks/';
+
 function statusLine(r) {
   const icon = r.skipped ? ICON.skip : (r.ok ? (r.warn ? ICON.warn : ICON.ok) : ICON.fail);
   const prefix = r.skipped ? '⏭️ ' : '';
-  return `${icon} **${r.name}** — ${prefix}${r.detail.split('\n')[0]}`;
+  return `${icon} [**${r.name}**](${CHECK_DOCS}#${slug(r.name)}) — ${prefix}${r.detail.split('\n')[0]}`;
 }
 
 function buildComment(results) {
@@ -700,7 +702,7 @@ function buildComment(results) {
   if (PROFILE_LINE) body += PROFILE_LINE + '\n';
   body += `\n${lines.join('\n')}`;
   if (details.length) body += `\n\n---\n\n${details.join('\n\n')}`;
-  body += `\n\n<sub>hermes-work · branch \`${BRANCH}\` · base \`${BASE_BRANCH}\`</sub>`;
+  body += `\n\n<sub>hermes-work · branch \`${BRANCH}\` · base \`${BASE_BRANCH}\` · [Was prüfen diese Tests?](${CHECK_DOCS})</sub>`;
   return body;
 }
 

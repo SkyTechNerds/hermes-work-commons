@@ -27,12 +27,17 @@ import sys
 ICON = {"pass": "✅", "fail": "❌", "warn": "⚠️", "skip": "⚪"}
 
 
+CHECK_DOCS = "https://web.skycryer.com/codemole/docs/checks/"
+
+
 def status_line(c):
     s = c.get("status", "pass")
     icon = ICON.get(s, "•")
     prefix = "⏭️ " if s == "skip" else ""
     first = (c.get("message") or "").split("\n")[0]
-    return f"{icon} **{c['name']}** — {prefix}{first}"
+    name = c["name"]
+    slug = name.lower().replace(" ", "-")
+    return f"{icon} [**{name}**]({CHECK_DOCS}#{slug}) — {prefix}{first}"
 
 
 def render(checks, branch="", base=""):
@@ -49,7 +54,7 @@ def render(checks, branch="", base=""):
     ]
     if details:
         body += "\n\n---\n\n" + "\n\n".join(details)
-    body += f"\n\n<sub>hermes-work · branch `{branch}` · base `{base}`</sub>"
+    body += f"\n\n<sub>hermes-work · branch `{branch}` · base `{base}` · [Was prüfen diese Tests?]({CHECK_DOCS})</sub>"
     return body
 
 
