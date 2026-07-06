@@ -228,6 +228,26 @@ async function handleIssueComment(payload) {
   if (/geantwortet/.test(out.out)) notifyDiscord(`\ud83e\uddab **${repo}#${pr}** \u00b7 Frage per Mention beantwortet\n<https://github.com/${repo}/pull/${pr}>`);
 }
 
+// Fremde Installation (Org nicht in ALLOWED_OWNERS) sofort wieder entfernen.
+// installation-Events liefert GitHub automatisch (kein Event-Abo noetig).
+// So bleibt die App zwar public/installierbar, aber nur die Whitelist-Orgs behalten sie.
+async function handleInstallation(payload) {
+  const inst = payload.installation || {};
+  const owner = (inst.account && inst.account.login) || '';
+  const id = inst.id;
+  if (ALLOWED_OWNERS.includes(owner)) { log(`installation ${owner} (#${id}): erlaubt`); return; }
+  const jwt = makeAppJwt();
+  await new Promise((resolve) => {
+    const req = https.request({
+      host: 'api.github.com', path: `/app/installations/${id}`, method: 'DELETE',
+      headers: { Authorization: `Bearer ${jwt}`, Accept: 'application/vnd.github+json', 'User-Agent': 'hermes-work-app' },
+    }, r => { r.on('data', () => {}); r.on('end', () => { log(`installation ${owner} (#${id}): NICHT in Whitelist -> deinstalliert (HTTP ${r.statusCode})`); resolve(); }); });
+    req.on('error', (e) => { log(`installation-delete-fail ${owner}: ${e.message}`); resolve(); });
+    req.end();
+  });
+  notifyDiscord(`\ud83d\udeab Fremde Installation abgelehnt: **${owner}** (nicht in Whitelist) \u2014 automatisch deinstalliert.`);
+}
+
 // Lighthouse on-demand: Label `lighthouse` an den PR → schwerer Zwei-Pass-Lauf,
 // Ergebnis als eigener Kommentar. Läuft bewusst NICHT bei jedem Push (zu langsam).
 async function handleLighthouse(payload) {
@@ -310,6 +330,8 @@ const server = http.createServer((req, res) => {
     } else if (event === 'issue_comment' && payload.action === 'created' &&
                payload.issue && payload.issue.pull_request) {
       handleIssueComment(payload).catch(e => log(`comment-error: ${e.message}`));
+    } else if (event === 'installation' && payload.action === 'created') {
+      handleInstallation(payload).catch(e => log(`installation-error: ${e.message}`));
     } else {
       log(`ignored event=${event} action=${payload.action || '-'}`);
     }
