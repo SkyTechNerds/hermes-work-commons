@@ -90,6 +90,9 @@ for f in os.environ["YAML_FILES"].split():
             code = raw[1:]
             if code.lstrip().startswith("#") or "{{" in code or "!secret" in code:
                 continue
+            # action:/service:-Werte sind Service-Namen (domain.service), keine Entities -> ueberspringen
+            if re.match(r"^\s*-?\s*(action|service)\s*:", code):
+                continue
             for ent in ENT_RE.findall(code):
                 if ent not in live and ent not in seen:
                     seen.add(ent)
