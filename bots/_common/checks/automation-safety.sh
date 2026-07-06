@@ -88,7 +88,6 @@ if [ -z "$OUT" ]; then
   emit pass "$(t "Keine Trigger-/Konventions-Probleme in den geänderten Zeilen" "No trigger/convention issues in the changed lines")"
 else
   N=$(echo "$OUT" | grep -c .)
-  MSG="$(t "$N Hinweis(e):" "$N hint(s):")
-$OUT"
-  python3 -c "import json,sys;print(json.dumps({'name':'automation-safety','status':'warn','message':sys.argv[1]}))" "$MSG"
+  [ -n "${CM_INLINE:-}" ] && printf '%s\n' "$OUT" | CM_CHECK=automation-safety CM_SEV=warn python3 "$(dirname "${BASH_SOURCE[0]}")/../to-inline.py" >> "$CM_INLINE" 2>/dev/null
+  emit warn "$(t "$N Trigger-/Konventions-Hinweis(e) — inline markiert" "$N trigger/convention hint(s) — flagged inline")"
 fi

@@ -111,6 +111,6 @@ if [ -z "$OUT" ]; then
   emit pass "$(t "Alle referenzierten Entities existieren in der HA-Instanz" "All referenced entities exist in the HA instance")"
 else
   N=$(echo "$OUT" | grep -c .)
-  python3 -c "import json,sys;print(json.dumps({'name':'entity-exists','status':'warn','message':sys.argv[1]}))" "$(t "$N unbekannte Entity/Entities:" "$N unknown entity/entities:")
-$OUT"
+  [ -n "${CM_INLINE:-}" ] && printf '%s\n' "$OUT" | CM_CHECK=entity-exists CM_SEV=warn python3 "$(dirname "${BASH_SOURCE[0]}")/../to-inline.py" >> "$CM_INLINE" 2>/dev/null
+  emit warn "$(t "$N unbekannte Entity/Entities — inline markiert" "$N unknown entity/entities — flagged inline")"
 fi

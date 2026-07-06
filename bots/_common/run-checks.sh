@@ -109,7 +109,8 @@ DIFF_FILES_FILE="/tmp/runchecks-$SLUG-$PR.files"
 printf '%s\n' "$DIFF_FILES" > "$DIFF_FILES_FILE"
 export DIFF_FILES_FILE
 
-export REPO PR BASE_SHA HEAD_SHA DIFF_FILES GH_TOKEN GITHUB_TOKEN REPO_DIR RESOLVE
+export CM_INLINE="/tmp/cm-inline-$SLUG-$PR.jsonl"; : > "$CM_INLINE"
+export REPO PR BASE_SHA HEAD_SHA DIFF_FILES GH_TOKEN GITHUB_TOKEN REPO_DIR RESOLVE CM_INLINE
 RESULTS="/tmp/runchecks-$SLUG-$PR.json"
 echo '{"checks":[' > "$RESULTS"; FIRST=1
 for c in $CHECKS; do
@@ -155,4 +156,7 @@ OUT_MD="/tmp/runchecks-$SLUG-$PR.md"
 python3 "$COMMON/render-report.py" "$RESULTS" "$BRANCH" "$BASE" "$OUT_MD"
 if [ "$MODE" = "post" ]; then
   python3 "$COMMON/post-comment.py" "$REPO" "$PR" "$OUT_MD"
+  [ -s "$CM_INLINE" ] && python3 "$COMMON/post-inline-findings.py" "$CM_INLINE" "$REPO" "$PR"
+elif [ -s "$CM_INLINE" ]; then
+  echo "=== INLINE-FUNDE (dry) ==="; cat "$CM_INLINE"
 fi
