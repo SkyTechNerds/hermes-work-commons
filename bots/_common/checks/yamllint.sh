@@ -11,5 +11,6 @@ RC=$?
 if [ -z "$YAML_ERR" ]; then
   emit pass "$(t "${#YAML_FILES[@]} YAML-Datei(en) — keine neuen Lint-Fehler in den geänderten Zeilen" "${#YAML_FILES[@]} YAML file(s) — no new lint errors in the changed lines")"
 else
-  emit fail "$(printf '%s\n' "$YAML_ERR" | grep -c .) $(t "neue Lint-Fehler in geänderten Zeilen" "new lint errors in changed lines")"
+  [ -n "${CM_INLINE:-}" ] && printf '%s\n' "$YAML_ERR" | CM_CHECK=yamllint CM_SEV=fail python3 "$COMMON/to-inline.py" >> "$CM_INLINE" 2>/dev/null
+  emit fail "$(printf '%s\n' "$YAML_ERR" | grep -c .) $(t "neue Lint-Fehler in geänderten Zeilen — inline markiert" "new lint errors in changed lines — flagged inline")"
 fi

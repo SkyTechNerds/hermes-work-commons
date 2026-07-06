@@ -10,7 +10,7 @@ for ln in sys.stdin:
     ln = ln.rstrip("\n")
     if not ln.strip():
         continue
-    m = re.match(r'^(\S+?):(\d+)(?::\d+)?\s+(.*)$', ln)
+    m = re.match(r'^(\S+?):(\d+)(?::\d+)?:?\s+(.*)$', ln)
     if not m:
         continue
     print(json.dumps({"check": check, "file": m.group(1), "line": int(m.group(2)),
