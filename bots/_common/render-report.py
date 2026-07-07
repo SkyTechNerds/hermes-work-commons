@@ -52,7 +52,7 @@ def render(checks, branch="", base=""):
     details = [
         f"### {c['name']}\n{c['message']}"
         for c in checks
-        if c.get("status") == "fail" or "\n" in (c.get("message") or "")
+        if "\n" in (c.get("message") or "")
     ]
     if details:
         body += "\n\n---\n\n" + "\n\n".join(details)
