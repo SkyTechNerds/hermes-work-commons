@@ -194,7 +194,13 @@ async function handlePullRequest(payload) {
     reviewLine = `🔍 Review: ✅ fertig — ${n === '0' ? 'sauber, keine Findings' : n + ' Finding(s)'}`;
   }
   const auditLine = (am && /^\d+$/.test(am[1]) && am[1] !== '0') ? `\n🔎 Audit: ${am[1]} neue Finding(s)` : '';
-  notifyDiscord(`🦫 **${repo}#${pr}** · \`${branch}\` → \`${base}\` · ${now}\n${testLine}\n${reviewLine}${auditLine}\n<https://github.com/${repo}/pull/${pr}>`);
+  if (reviewErr || runnerFail) {
+    const head = reviewErr ? 'CODE-REVIEW FEHLGESCHLAGEN' : 'TEST-RUNNER FEHLGESCHLAGEN';
+    const detail = reviewErr ? reviewLine.replace('🔍 Review: ⚠️ FEHLGESCHLAGEN — ', '') : 'run-checks brach ab (Clone/Fetch/Checkout/Lock?)';
+    notifyDiscord(`🚨🚨 **${head}** 🚨🚨\n**${repo}#${pr}** · \`${branch}\` → \`${base}\` · ${now}\n❌ ${detail}\n${testLine}${auditLine}\n<https://github.com/${repo}/pull/${pr}>`);
+  } else {
+    notifyDiscord(`🦫 **${repo}#${pr}** · \`${branch}\` → \`${base}\` · ${now}\n${testLine}\n${reviewLine}${auditLine}\n<https://github.com/${repo}/pull/${pr}>`);
+  }
 }
 
 // Antwortet auf Replies zu eigenen Inline-Findings (pull_request_review_comment).
