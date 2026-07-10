@@ -175,11 +175,24 @@ async function handlePullRequest(payload) {
   const am = audit.out.match(/PAGE-AUDIT: (\d+|nicht konfiguriert)/);
   log(`page-audit ${repo}#${pr}: ${am ? am[1] : '?'} (exit ${audit.code})`);
 
-  const passC = (test.out.match(/\u2705/g) || []).length;
-  const failC = (test.out.match(/\u274c/g) || []).length;
-  const findings = fm ? fm[1] : '0';
-  const auditTxt = am && /^\d+$/.test(am[1]) && am[1] !== '0' ? ` \u00b7 \ud83d\udd0e ${am[1]} Audit` : '';
-  notifyDiscord(`\ud83e\uddab **${repo}#${pr}** \u00b7 \`${branch}\` \u2192 \`${base}\`\nTests: ${passC}\u2705 ${failC}\u274c \u00b7 Review: ${findings} Finding(s)${auditTxt}\n<https://github.com/${repo}/pull/${pr}>`);
+  const passC = (test.out.match(/✅/g) || []).length;
+  const failC = (test.out.match(/❌/g) || []).length;
+  const reviewErr = review.code !== 0 || /AI-REVIEW-ERROR/.test(review.out);
+  const reviewSkip = /kein Diff|per ignore ausgenommen/.test(review.out);
+  const now = new Date().toLocaleTimeString('de-DE', { timeZone: 'Europe/Berlin', hour: '2-digit', minute: '2-digit' });
+  const testLine = `🧪 Tests: ${passC}✅ ${failC}❌${test.code !== 0 ? ' ⚠️ Runner-Fehler' : ''}`;
+  let reviewLine;
+  if (reviewErr) {
+    const reason = /keine Modell-Antwort/.test(review.out) ? 'Modell antwortete nicht' : `Fehler (exit ${review.code})`;
+    reviewLine = `🔍 Review: ⚠️ FEHLGESCHLAGEN — ${reason}`;
+  } else if (reviewSkip) {
+    reviewLine = `🔍 Review: ⏭️ übersprungen (kein Diff)`;
+  } else {
+    const n = fm ? fm[1] : '0';
+    reviewLine = `🔍 Review: ✅ fertig — ${n === '0' ? 'sauber, keine Findings' : n + ' Finding(s)'}`;
+  }
+  const auditLine = (am && /^\d+$/.test(am[1]) && am[1] !== '0') ? `\n🔎 Audit: ${am[1]} neue Finding(s)` : '';
+  notifyDiscord(`🦫 **${repo}#${pr}** · \`${branch}\` → \`${base}\` · ${now}\n${testLine}\n${reviewLine}${auditLine}\n<https://github.com/${repo}/pull/${pr}>`);
 }
 
 // Antwortet auf Replies zu eigenen Inline-Findings (pull_request_review_comment).

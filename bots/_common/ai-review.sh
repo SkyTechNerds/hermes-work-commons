@@ -106,6 +106,7 @@ $DIFF
 ===== ENDE UNTRUSTED DIFF ====="
 
 RESP="$(printf '%s' "$PROMPT" | claude -p "${CLAUDE_TOOL_LOCKDOWN[@]}" 2>/dev/null)"
+if [ -z "$RESP" ]; then echo "AI-REVIEW-ERROR: keine Modell-Antwort (claude -p leer -- Timeout/Fehler?)"; exit 3; fi
 export RESP CM_SEVERITY DIFF_FOR_VALIDATION="$DIFF"
 python3 <<'PY'
 import json, os, re, subprocess
