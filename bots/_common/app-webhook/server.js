@@ -180,7 +180,8 @@ async function handlePullRequest(payload) {
   const reviewErr = review.code !== 0 || /AI-REVIEW-ERROR/.test(review.out);
   const reviewSkip = /kein Diff|per ignore ausgenommen/.test(review.out);
   const now = new Date().toLocaleTimeString('de-DE', { timeZone: 'Europe/Berlin', hour: '2-digit', minute: '2-digit' });
-  const testLine = `🧪 Tests: ${passC}✅ ${failC}❌${test.code !== 0 ? ' ⚠️ Runner-Fehler' : ''}`;
+  const runnerFail = /run-checks:\s/.test(test.out) || /run\.js fehlt/.test(test.out);
+  const testLine = `🧪 Tests: ${passC}✅ ${failC}❌${runnerFail ? ' ⚠️ Runner-Fehler' : ''}`;
   let reviewLine;
   if (reviewErr) {
     const reason = /keine Modell-Antwort/.test(review.out) ? 'Modell antwortete nicht' : `Fehler (exit ${review.code})`;
