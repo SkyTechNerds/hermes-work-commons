@@ -107,6 +107,8 @@ $DIFF
 
 RESP="$(printf '%s' "$PROMPT" | claude -p "${CLAUDE_TOOL_LOCKDOWN[@]}" 2>/dev/null)"
 if [ -z "$RESP" ]; then echo "AI-REVIEW-ERROR: keine Modell-Antwort (claude -p leer -- Timeout/Fehler?)"; exit 3; fi
+if printf %s "$RESP" | grep -qiE "API Error|Failed to authenticate|Invalid authentication|Unauthorized|401 |rate limit|overloaded|Internal server error|Credit balance"; then echo "AI-REVIEW-ERROR: Modell-Fehler -- $(printf %s "$RESP" | tr -d "\n" | head -c 120)"; exit 3; fi
+if ! printf %s "$RESP" | grep -q "\["; then echo "AI-REVIEW-ERROR: unerwartetes Antwortformat (kein JSON-Array -- Modell folgte dem Format nicht)"; exit 3; fi
 export RESP CM_SEVERITY DIFF_FOR_VALIDATION="$DIFF"
 python3 <<'PY'
 import json, os, re, subprocess

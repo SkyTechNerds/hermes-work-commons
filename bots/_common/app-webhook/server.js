@@ -184,7 +184,8 @@ async function handlePullRequest(payload) {
   const testLine = `🧪 Tests: ${passC}✅ ${failC}❌${runnerFail ? ' ⚠️ Runner-Fehler' : ''}`;
   let reviewLine;
   if (reviewErr) {
-    const reason = /keine Modell-Antwort/.test(review.out) ? 'Modell antwortete nicht' : `Fehler (exit ${review.code})`;
+    const em = review.out.match(/AI-REVIEW-ERROR:\s*([^\n]+)/);
+    const reason = em ? em[1].slice(0, 90) : `Fehler (exit ${review.code})`;
     reviewLine = `🔍 Review: ⚠️ FEHLGESCHLAGEN — ${reason}`;
   } else if (reviewSkip) {
     reviewLine = `🔍 Review: ⏭️ übersprungen (kein Diff)`;
