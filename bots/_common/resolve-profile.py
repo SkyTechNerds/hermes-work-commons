@@ -25,6 +25,7 @@ PROFILES = {
     "ha-config":    ["yamllint", "ha-validate", "includes", "secret-refs", "duplicate-ids", "automation-safety", "entity-exists", "diff-size"],
     "ha-component": ["python-syntax", "ruff", "manifest", "hacs", "translations", "json-valid", "diff-size"],
     "aem-eds":      ["eslint", "aem-block-validator", "visual", "diff-size"],
+    "wordpress":    ["php-lint", "phpcs", "diff-size"],
     "generic":      ["diff-size"],
 }
 UNIVERSAL = ["secret-scan", "conflict-markers", "sensitive-files", "ai-review"]
@@ -53,6 +54,10 @@ def detect(repo_dir):
         return "ha-component"
     if os.path.isdir(os.path.join(repo_dir, "blocks")) and has("package.json"):
         return "aem-eds"
+    # WordPress-Theme/-Plugin: funktions-/Theme-Marker oder wp-content-Baum.
+    if has("functions.php", "theme.json", "wp-config.php", "wp-load.php", "wp-settings.php") \
+            or os.path.isdir(os.path.join(repo_dir, "wp-content")):
+        return "wordpress"
     return "generic"
 
 
