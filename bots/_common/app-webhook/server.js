@@ -194,6 +194,14 @@ async function handlePullRequest(payload) {
     reviewLine = `🔍 Review: ✅ fertig — ${n === '0' ? 'sauber, keine Findings' : n + ' Finding(s)'}`;
   }
   const auditLine = (am && /^\d+$/.test(am[1]) && am[1] !== '0') ? `\n🔎 Audit: ${am[1]} neue Finding(s)` : '';
+  const findingsN = fm ? parseInt(fm[1], 10) : null;
+  const auditN = (am && /^\d+$/.test(am[1])) ? parseInt(am[1], 10) : 0;
+  const clean = !runnerFail && failC === 0 && !reviewErr && !reviewSkip && findingsN === 0 && auditN === 0;
+  await run(path.join(BOTS_DIR, '_common', 'pr-approve.sh'),
+    [repo, String(pr), clean ? 'approve' : 'dismiss',
+     clean ? 'Alle Checks bestanden, KI-Review ohne Findings. — CodeMole'
+           : 'Nicht mehr sauber (Findings oder fehlgeschlagene Checks) — Approve zurückgezogen.'],
+    token, project);
   if (reviewErr || runnerFail) {
     const head = reviewErr ? 'CODE-REVIEW FEHLGESCHLAGEN' : 'TEST-RUNNER FEHLGESCHLAGEN';
     const detail = reviewErr ? reviewLine.replace('🔍 Review: ⚠️ FEHLGESCHLAGEN — ', '') : 'run-checks brach ab (Clone/Fetch/Checkout/Lock?)';
