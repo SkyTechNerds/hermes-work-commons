@@ -39,8 +39,8 @@ RAW_DIFF="$("$DIR/pr-diff.sh" "$REPO" "$PR" 2>/dev/null)"
 
 # ignore-Globs anwenden + Budget (14 kB) an FILE-Block-Grenzen kürzen — hartes
 # `head -c` schnitt mitten im Hunk ab und produzierte falsche Zeilennummern.
-DIFF="$(CM_IGNORE="$CM_IGNORE" DIFF_IN="$RAW_DIFF" python3 -c '
-import os, re, fnmatch
+DIFF="$(printf '%s' "$RAW_DIFF" | CM_IGNORE="$CM_IGNORE" python3 -c '
+import os, re, fnmatch, sys
 BUDGET = 14000
 globs = [g for g in os.environ["CM_IGNORE"].split("\n") if g]
 def ig(p):
@@ -49,7 +49,7 @@ def ig(p):
         if fnmatch.fnmatch(p, g) or fnmatch.fnmatch(p, g2) or fnmatch.fnmatch(p, "*/" + g2):
             return True
     return False
-txt = os.environ["DIFF_IN"]
+txt = sys.stdin.read()
 keep, used, dropped = [], 0, 0
 for b in re.split(r"(?m)(?=^=== FILE: )", txt):
     if not b:
