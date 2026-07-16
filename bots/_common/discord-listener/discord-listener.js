@@ -141,6 +141,21 @@ function parseTestRequest(content) {
   };
 }
 
+// Trigger-Text kann in message.content ODER im Embed (Footer/Description/Title)
+// stehen: der JUMO-Inline-Workflow schreibt content="TEST_REQUEST ..." aber
+// footer="JUMO_TEST_REQUEST ...". Ohne den Footer wird JUMO als generisch
+// (Prefix TEST_REQUEST) fehl-erkannt und im JUMO-Kanal verworfen.
+function triggerCandidates(message) {
+  const out = [];
+  if (message.content) out.push(String(message.content).trim());
+  for (const e of (message.embeds || [])) {
+    if (e && e.footer && e.footer.text) out.push(String(e.footer.text).trim());
+    if (e && e.description) out.push(String(e.description).trim());
+    if (e && e.title) out.push(String(e.title).trim());
+  }
+  return out;
+}
+
 // --- Input Validation ------------------------------------------------------
 
 // Whitelist of characters safe for a git branch name. Used to reject shell-meta
@@ -453,8 +468,19 @@ client.on(Events.MessageCreate, async message => {
     return message.reply(`✅ Hermes-Work Listener v${config.version} — watching ${channels.size} channels. Last message: ${new Date().toISOString()}`);
   }
 
-  // Main trigger: TEST_REQUEST branch=X pr=Y
-  const parsed = parseTestRequest(content);
+  // Main trigger: TEST_REQUEST branch=X pr=Y — Trigger kann in content ODER im
+  // Embed-Footer stehen. Kandidaten sammeln, spezifischsten waehlen (repo= bzw.
+  // ein nicht-generischer Prefix wie JUMO_TEST_REQUEST schlaegt bare TEST_REQUEST).
+  let parsed = null;
+  for (const cand of triggerCandidates(message)) {
+    const p = parseTestRequest(cand);
+    if (!p) continue;
+    if (!parsed
+        || (p.repo && !parsed.repo)
+        || (p.prefix !== 'TEST_REQUEST' && parsed.prefix === 'TEST_REQUEST')) {
+      parsed = p;
+    }
+  }
   if (!parsed) return;
 
   await handleTestRequest(message, channelCfg, parsed);
