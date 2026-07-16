@@ -26,16 +26,16 @@ fi
 
 do_approve() {
   local sha; sha="$(gh api "repos/$REPO/pulls/$PR" --jq .head.sha 2>/dev/null)" || { echo "pr-approve: head-SHA nicht ermittelbar" >&2; return 1; }
-  local n; n="$(gh api "repos/$REPO/pulls/$PR/reviews" \
+  local n; n="$(gh api "repos/$REPO/pulls/$PR/reviews?per_page=100" \
         --jq "[.[] | select(.user.login==\"$BOT\" and .state==\"APPROVED\" and .commit_id==\"$sha\")] | length" 2>/dev/null || echo 0)"
   if [ "${n:-0}" -gt 0 ]; then echo "APPROVE-SKIP: schon approved fuer $sha"; return 0; fi
-  gh api -X POST "repos/$REPO/pulls/$PR/reviews" \
+  gh api -X POST "repos/$REPO/pulls/$PR/reviews?per_page=100" \
     -f event=APPROVE -f commit_id="$sha" -f body="${BODY:-Alle Findings adressiert, Checks sauber. — CodeMole}" \
     --jq '"APPROVED: " + (.html_url // "ok")'
 }
 
 do_dismiss() {
-  local ids; ids="$(gh api "repos/$REPO/pulls/$PR/reviews" \
+  local ids; ids="$(gh api "repos/$REPO/pulls/$PR/reviews?per_page=100" \
           --jq ".[] | select(.user.login==\"$BOT\" and .state==\"APPROVED\") | .id" 2>/dev/null || true)"
   [ -z "$ids" ] && { echo "DISMISS-NOOP: kein offenes Approve"; return 0; }
   local id
