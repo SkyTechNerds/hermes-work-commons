@@ -232,7 +232,7 @@ async function handleReviewComment(payload) {
     [repo, String(pr), String(c.id)], token, projectForRepo(repo));
   log(`ai-reply ${repo}#${pr}: ${out.out.slice(-140).replace(/\n/g, ' ')}`);
   if (/geantwortet/.test(out.out)) notifyDiscord(`\ud83e\uddab **${repo}#${pr}** \u00b7 auf Review-Reply geantwortet\n<https://github.com/${repo}/pull/${pr}>`);
-  await run(path.join(BOTS_DIR, '_common', 'pr-approve.sh'), [repo, String(pr), 'auto'], token, projectForRepo(repo));
+  { const _ap = await run(path.join(BOTS_DIR, '_common', 'pr-approve.sh'), [repo, String(pr), 'auto'], token, projectForRepo(repo)); log(`auto-approve ${repo}#${pr}: ${(_ap.out||'').slice(-160).replace(/\n/g,' ')} [exit ${_ap.code}]`); }
 }
 
 // Q&A auf Top-Level-PR-Kommentare: antwortet NUR bei Mention @the-codemole
@@ -256,7 +256,7 @@ async function handleIssueComment(payload) {
     [repo, String(pr), String(c.id)], token, projectForRepo(repo));
   log(`ai-comment ${repo}#${pr}: ${out.out.slice(-120).replace(/\n/g, ' ')}`);
   if (/geantwortet/.test(out.out)) notifyDiscord(`\ud83e\uddab **${repo}#${pr}** \u00b7 Frage per Mention beantwortet\n<https://github.com/${repo}/pull/${pr}>`);
-  await run(path.join(BOTS_DIR, '_common', 'pr-approve.sh'), [repo, String(pr), 'auto'], token, projectForRepo(repo));
+  { const _ap = await run(path.join(BOTS_DIR, '_common', 'pr-approve.sh'), [repo, String(pr), 'auto'], token, projectForRepo(repo)); log(`auto-approve ${repo}#${pr}: ${(_ap.out||'').slice(-160).replace(/\n/g,' ')} [exit ${_ap.code}]`); }
 }
 
 // Fremde Installation (Org nicht in ALLOWED_OWNERS) sofort wieder entfernen.
