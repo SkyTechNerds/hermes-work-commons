@@ -47,9 +47,16 @@ BASE_ERRS=""; [ -f "$CACHE" ] && BASE_ERRS="$(cat "$CACHE")"
 
 # 3) Nur NEUE Fehler melden
 NEW="$(BRANCH_ERRS="$BRANCH_ERRS" BASE_ERRS="$BASE_ERRS" python3 -c '
-import os
-base = set(os.environ["BASE_ERRS"].splitlines())
-out = [l for l in os.environ["BRANCH_ERRS"].splitlines() if l and l not in base]
+import os, re
+
+def key(l):
+    # Zeilennummer fuer den Vergleich normalisieren: fuegt der PR weiter oben
+    # Zeilen ein, wandert ein BESTANDSfehler nach unten ("line 166" -> "line 177")
+    # und galt sonst faelschlich als NEU. Anzeige bleibt der Originaltext.
+    return re.sub(r"\bline \d+\b", "line N", l, flags=re.I).strip()
+
+base = {key(l) for l in os.environ["BASE_ERRS"].splitlines() if l.strip()}
+out = [l for l in os.environ["BRANCH_ERRS"].splitlines() if l.strip() and key(l) not in base]
 print("\n".join(out[:12]))
 ')"
 
