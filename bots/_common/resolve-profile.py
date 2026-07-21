@@ -26,6 +26,7 @@ PROFILES = {
     "ha-component": ["python-syntax", "ruff", "manifest", "hacs", "translations", "json-valid", "diff-size"],
     "aem-eds":      ["eslint", "aem-block-validator", "visual", "diff-size"],
     "wordpress":    ["php-lint", "phpcs", "diff-size"],
+    "python-app":   ["python-syntax", "ruff", "json-valid", "diff-size"],
     "generic":      ["diff-size"],
 }
 UNIVERSAL = ["secret-scan", "conflict-markers", "sensitive-files", "ai-review"]
@@ -58,6 +59,10 @@ def detect(repo_dir):
     if has("functions.php", "theme.json", "wp-config.php", "wp-load.php", "wp-settings.php") \
             or os.path.isdir(os.path.join(repo_dir, "wp-content")):
         return "wordpress"
+    # Generische Python-App (kein HA/AEM): statische Checks python-syntax/ruff/json-valid,
+    # die die Box OHNE projekt-eigene Deps fahren kann (kein Ausfuehren von PR-Code).
+    if has("pyproject.toml", "setup.py", "setup.cfg", "requirements.txt"):
+        return "python-app"
     return "generic"
 
 
