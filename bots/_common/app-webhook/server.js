@@ -32,6 +32,10 @@ const ALLOWED_OWNERS = ['SkyTechNerds', 'JUMO-GmbH-Co-KG', 'schimanski-antegma']
 // Laufs sind dann noch nicht gepostet -> er saehe faelschlich 0 offene Threads
 // und wuerde zu frueh approven (PR #375).
 const RUNS_IN_FLIGHT = new Set();
+// Wurde ein auto-Approve waehrend eines laufenden Pipeline-Laufs uebersprungen,
+// muss er NACH dem Lauf nachgeholt werden — sonst geht eine Thread-Aufloesung,
+// die mitten im Lauf passiert, verloren und der PR bleibt un-approved (PR #376).
+const PENDING_REEVAL = new Set();
 const PORT = parseInt(process.env.PORT || '3956', 10);
 const LOG = process.env.HERMES_APP_LOG || '/var/log/hermes-work-app.log';
 const WORKROOT = process.env.HERMES_APP_WORKROOT || '/opt/hermes-app-workdir';
@@ -220,6 +224,11 @@ async function handlePullRequest(payload) {
   }
   } finally {
     RUNS_IN_FLIGHT.delete(flightKey);
+    if (PENDING_REEVAL.delete(flightKey)) {
+      const _re = await run(path.join(BOTS_DIR, '_common', 'pr-approve.sh'),
+        [repo, String(pr), 'auto'], token, project);
+      log(`auto-approve ${flightKey}: nachgeholt nach Lauf — ${(_re.out || '').slice(-160).replace(/\n/g, ' ')} [exit ${_re.code}]`);
+    }
   }
 }
 
@@ -245,7 +254,8 @@ async function handleReviewComment(payload) {
   log(`ai-reply ${repo}#${pr}: ${out.out.slice(-140).replace(/\n/g, ' ')}`);
   if (/geantwortet/.test(out.out)) notifyDiscord(`\ud83e\uddab **${repo}#${pr}** \u00b7 auf Review-Reply geantwortet\n<https://github.com/${repo}/pull/${pr}>`);
   if (RUNS_IN_FLIGHT.has(`${repo}#${pr}`)) {
-    log(`auto-approve ${repo}#${pr}: uebersprungen (Pipeline-Lauf aktiv)`);
+    log(`auto-approve ${repo}#${pr}: uebersprungen (Pipeline-Lauf aktiv) — wird nachgeholt`);
+    PENDING_REEVAL.add(`${repo}#${pr}`);
   } else {
     { const _ap = await run(path.join(BOTS_DIR, '_common', 'pr-approve.sh'), [repo, String(pr), 'auto'], token, projectForRepo(repo)); log(`auto-approve ${repo}#${pr}: ${(_ap.out||'').slice(-160).replace(/\n/g,' ')} [exit ${_ap.code}]`); }
   }
@@ -273,7 +283,8 @@ async function handleIssueComment(payload) {
   log(`ai-comment ${repo}#${pr}: ${out.out.slice(-120).replace(/\n/g, ' ')}`);
   if (/geantwortet/.test(out.out)) notifyDiscord(`\ud83e\uddab **${repo}#${pr}** \u00b7 Frage per Mention beantwortet\n<https://github.com/${repo}/pull/${pr}>`);
   if (RUNS_IN_FLIGHT.has(`${repo}#${pr}`)) {
-    log(`auto-approve ${repo}#${pr}: uebersprungen (Pipeline-Lauf aktiv)`);
+    log(`auto-approve ${repo}#${pr}: uebersprungen (Pipeline-Lauf aktiv) — wird nachgeholt`);
+    PENDING_REEVAL.add(`${repo}#${pr}`);
   } else {
     { const _ap = await run(path.join(BOTS_DIR, '_common', 'pr-approve.sh'), [repo, String(pr), 'auto'], token, projectForRepo(repo)); log(`auto-approve ${repo}#${pr}: ${(_ap.out||'').slice(-160).replace(/\n/g,' ')} [exit ${_ap.code}]`); }
   }
