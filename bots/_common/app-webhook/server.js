@@ -26,6 +26,12 @@ const { spawn } = require('node:child_process');
 const CONF_DIR = process.env.HERMES_APP_CONF || '/etc/hermes-work-app';
 const BOTS_DIR = process.env.HERMES_BOTS_DIR || '/opt/hermes-work-commons/bots';
 const ALLOWED_OWNERS = ['SkyTechNerds', 'JUMO-GmbH-Co-KG', 'schimanski-antegma'];  // bei public: nur diese Orgs bedienen
+
+// Laufende Pipeline-Laeufe je repo#pr. Der auto-Approve (Reply-/Mention-Pfad)
+// darf NICHT entscheiden, waehrend ein Lauf noch laeuft: die Findings dieses
+// Laufs sind dann noch nicht gepostet -> er saehe faelschlich 0 offene Threads
+// und wuerde zu frueh approven (PR #375).
+const RUNS_IN_FLIGHT = new Set();
 const PORT = parseInt(process.env.PORT || '3956', 10);
 const LOG = process.env.HERMES_APP_LOG || '/var/log/hermes-work-app.log';
 const WORKROOT = process.env.HERMES_APP_WORKROOT || '/opt/hermes-app-workdir';
@@ -160,6 +166,9 @@ async function handlePullRequest(payload) {
   catch (e) { log(`token-fail ${repo}#${pr}: ${e.message}`); return; }
 
   log(`run ${repo}#${pr} (${branch} -> ${base}, project=${project})`);
+  const flightKey = `${repo}#${pr}`;
+  RUNS_IN_FLIGHT.add(flightKey);
+  try {
   const test = await run(path.join(BOTS_DIR, '_common', 'run-checks.sh'),
     [repo, String(pr), branch, base, 'post'], token, project);
   log(`test ${repo}#${pr} exit ${test.code}: ${test.out.slice(-160).replace(/\n/g, ' ')}`);
@@ -209,6 +218,9 @@ async function handlePullRequest(payload) {
   } else {
     notifyDiscord(`🦫 **${repo}#${pr}** · \`${branch}\` → \`${base}\` · ${now}\n${testLine}\n${reviewLine}${auditLine}\n<https://github.com/${repo}/pull/${pr}>`);
   }
+  } finally {
+    RUNS_IN_FLIGHT.delete(flightKey);
+  }
 }
 
 // Antwortet auf Replies zu eigenen Inline-Findings (pull_request_review_comment).
@@ -232,7 +244,11 @@ async function handleReviewComment(payload) {
     [repo, String(pr), String(c.id)], token, projectForRepo(repo));
   log(`ai-reply ${repo}#${pr}: ${out.out.slice(-140).replace(/\n/g, ' ')}`);
   if (/geantwortet/.test(out.out)) notifyDiscord(`\ud83e\uddab **${repo}#${pr}** \u00b7 auf Review-Reply geantwortet\n<https://github.com/${repo}/pull/${pr}>`);
-  { const _ap = await run(path.join(BOTS_DIR, '_common', 'pr-approve.sh'), [repo, String(pr), 'auto'], token, projectForRepo(repo)); log(`auto-approve ${repo}#${pr}: ${(_ap.out||'').slice(-160).replace(/\n/g,' ')} [exit ${_ap.code}]`); }
+  if (RUNS_IN_FLIGHT.has(`${repo}#${pr}`)) {
+    log(`auto-approve ${repo}#${pr}: uebersprungen (Pipeline-Lauf aktiv)`);
+  } else {
+    { const _ap = await run(path.join(BOTS_DIR, '_common', 'pr-approve.sh'), [repo, String(pr), 'auto'], token, projectForRepo(repo)); log(`auto-approve ${repo}#${pr}: ${(_ap.out||'').slice(-160).replace(/\n/g,' ')} [exit ${_ap.code}]`); }
+  }
 }
 
 // Q&A auf Top-Level-PR-Kommentare: antwortet NUR bei Mention @the-codemole
@@ -256,7 +272,11 @@ async function handleIssueComment(payload) {
     [repo, String(pr), String(c.id)], token, projectForRepo(repo));
   log(`ai-comment ${repo}#${pr}: ${out.out.slice(-120).replace(/\n/g, ' ')}`);
   if (/geantwortet/.test(out.out)) notifyDiscord(`\ud83e\uddab **${repo}#${pr}** \u00b7 Frage per Mention beantwortet\n<https://github.com/${repo}/pull/${pr}>`);
-  { const _ap = await run(path.join(BOTS_DIR, '_common', 'pr-approve.sh'), [repo, String(pr), 'auto'], token, projectForRepo(repo)); log(`auto-approve ${repo}#${pr}: ${(_ap.out||'').slice(-160).replace(/\n/g,' ')} [exit ${_ap.code}]`); }
+  if (RUNS_IN_FLIGHT.has(`${repo}#${pr}`)) {
+    log(`auto-approve ${repo}#${pr}: uebersprungen (Pipeline-Lauf aktiv)`);
+  } else {
+    { const _ap = await run(path.join(BOTS_DIR, '_common', 'pr-approve.sh'), [repo, String(pr), 'auto'], token, projectForRepo(repo)); log(`auto-approve ${repo}#${pr}: ${(_ap.out||'').slice(-160).replace(/\n/g,' ')} [exit ${_ap.code}]`); }
+  }
 }
 
 // Fremde Installation (Org nicht in ALLOWED_OWNERS) sofort wieder entfernen.
