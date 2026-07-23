@@ -1,21 +1,37 @@
 {
-  "version": "1.4.0+shared-default-repo",
-  "description": "Channel-Repo-Mapping für hermes-work Discord-Listener (Shared #jumo, alle Repos)",
-  "channels": [
-    {
-      "id": "1483798451786350741",
-      "name": "jumo",
-      "trigger_prefix": "JUMO_TEST_REQUEST",
-      "repo": "JUMO-GmbH-Co-KG/JUMO-Website-CMS",
-      "github": {
-        "token_file": "/etc/hermes-discord-listener/jumo.token"
-      },
-      "shared": true,
-      "allowed_repos": [
-        "JUMO-GmbH-Co-KG/JUMO-Website-CMS",
-        "SkyTechNerds/homeassistant-config",
-        "SkyTechNerds/ha-soft-presence"
-      ]
-    }
-  ]
+ "version": "1.4.0+shared-default-repo",
+ "description": "Channel-Repo-Mapping für hermes-work Discord-Listener (Shared #jumo, alle Repos)",
+ "channels": [
+  {
+   "id": "1483798451786350741",
+   "name": "jumo",
+   "trigger_prefix": "JUMO_TEST_REQUEST",
+   "repo": "JUMO-GmbH-Co-KG/JUMO-Website-CMS",
+   "github": {
+    "token_file": "/etc/hermes-discord-listener/jumo.token"
+   },
+   "shared": true,
+   "allowed_repos": [
+    "JUMO-GmbH-Co-KG/JUMO-Website-CMS",
+    "SkyTechNerds/homeassistant-config",
+    "SkyTechNerds/ha-soft-presence"
+   ]
+  },
+  {
+   "id": "1529783315085660180",
+   "name": "repo-checker",
+   "mode": "community",
+   "trigger_prefix": "COMMUNITY",
+   "repo": "SkyTechNerds/faceid",
+   "github": {
+    "token_file": "/etc/hermes-discord-listener/jumo.token"
+   },
+   "shared": true,
+   "allowed_repos": [
+    "SkyTechNerds/faceid",
+    "SkyTechNerds/ha-soft-presence",
+    "SkyTechNerds/hermes-work-commons"
+   ]
+  }
+ ]
 }
