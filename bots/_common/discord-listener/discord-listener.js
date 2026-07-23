@@ -444,7 +444,6 @@ client.on(Events.MessageCreate, async message => {
   if (!channelCfg) return;  // not a watched channel
 
   const content = message.content.trim();
-  log(`msg in #${channelCfg.name}: webhook=${message.webhookId ? 'yes' : 'no'} bot=${message.author.bot} content="${content.slice(0, 120)}" embeds=${message.embeds.length}`);
 
   // Command: retest → re-run last test for the latest PR in this channel
   if (content === '!retest' || content === 'retest') {
