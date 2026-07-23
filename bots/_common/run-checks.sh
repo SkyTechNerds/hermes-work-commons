@@ -59,9 +59,17 @@ git remote set-url origin "https://github.com/${REPO}.git" 2>/dev/null || true
 # PR-Head über refs/pull/<n>/head holen: funktioniert für Fork-PRs und macht den
 # Branch-Namen sicherheitstechnisch irrelevant. Fetch-Fehler = harter Abbruch —
 # sonst liefen die Checks still auf dem Stand des vorherigen PRs (Stale-Checkout).
-gitauth fetch --quiet --force origin \
-  "+refs/pull/$PR/head:refs/hermes/pr" "+refs/heads/$BASE:refs/hermes/base" \
-  || { echo "run-checks: Fetch fehlgeschlagen ($REPO#$PR)" >&2; exit 1; }
+# Retry: refs/pull/<n>/head propagiert bei GitHub oft erst ein paar Sekunden nach
+# PR-Oeffnung. Ohne Retry brach der Lauf ab und postete nichts (PR #379). Backoff 3/6/9s.
+FETCH_OK=""
+for attempt in 1 2 3 4; do
+  if gitauth fetch --quiet --force origin \
+      "+refs/pull/$PR/head:refs/hermes/pr" "+refs/heads/$BASE:refs/hermes/base"; then
+    FETCH_OK=1; break
+  fi
+  [ "$attempt" -lt 4 ] && { echo "run-checks: Fetch-Versuch $attempt fehlgeschlagen ($REPO#$PR) — refs/pull/$PR/head evtl. noch nicht propagiert, retry..." >&2; sleep $((attempt * 3)); }
+done
+[ -n "$FETCH_OK" ] || { echo "run-checks: Fetch fehlgeschlagen ($REPO#$PR) nach 4 Versuchen" >&2; exit 1; }
 git checkout --quiet --force --detach refs/hermes/pr \
   || { echo "run-checks: Checkout fehlgeschlagen" >&2; exit 1; }
 git clean -fdq 2>/dev/null || true   # stale untracked Dateien (z.B. alte .codemole.yml) entfernen
