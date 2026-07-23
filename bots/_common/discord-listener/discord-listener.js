@@ -468,40 +468,6 @@ client.on(Events.MessageCreate, async message => {
     return message.reply(`✅ Hermes-Work Listener v${config.version} — watching ${channels.size} channels. Last message: ${new Date().toISOString()}`);
   }
 
-  // Community-Modus (#repo-checker): COMMUNITY_ISSUE repo=<owner/name> issue=<n>
-  // -> Issue via issue-triage.sh (claude -p, tool-los) triagieren, Antwort im Channel.
-  if (channelCfg.mode === 'community') {
-    let cm = null;
-    for (const cand of triggerCandidates(message)) {
-      const m = cand.match(/\bCOMMUNITY_(ISSUE|COMMENT)\b[\s\S]*?\brepo=([\w.-]+\/[\w.-]+)[\s\S]*?\b(?:issue|pr)=(\d+)/i);
-      if (m) { cm = { kind: m[1].toUpperCase(), repo: m[2], num: m[3] }; break; }
-    }
-    if (!cm) return;
-    if (Array.isArray(channelCfg.allowed_repos) && !channelCfg.allowed_repos.includes(cm.repo)) {
-      log(`community skip: repo ${cm.repo} nicht in allowed_repos`);
-      return;
-    }
-    log(`community ${cm.kind} ${cm.repo}#${cm.num}: triage start`);
-    const ack = await message.reply(`🔍 Triage läuft für ${cm.repo}#${cm.num} …`);
-    try {
-      const out = await new Promise((res) => {
-        const p = spawn('bash', [path.join(BOTS_DIR, '_common', 'issue-triage.sh'), cm.repo, String(cm.num)], { timeout: 240000 });
-        let o = '';
-        p.stdout.on('data', d => { o += d; });
-        p.stderr.on('data', d => { o += d; });
-        p.on('close', () => res(o));
-        p.on('error', () => res(''));
-      });
-      const text = (out || '').trim().slice(0, 1800) || '(keine Triage-Ausgabe)';
-      await ack.edit(`🧭 **Triage ${cm.repo}#${cm.num}** (${cm.kind === 'ISSUE' ? 'neues Issue' : 'neuer Kommentar'})\n${text}`);
-      log(`community ${cm.repo}#${cm.num}: triage posted`);
-    } catch (e) {
-      await ack.edit(`❌ Triage fehlgeschlagen: ${String(e.message).slice(0, 300)}`);
-      log(`community triage error ${cm.repo}#${cm.num}: ${e.message}`);
-    }
-    return;
-  }
-
   // Main trigger: TEST_REQUEST branch=X pr=Y — Trigger kann in content ODER im
   // Embed-Footer stehen. Kandidaten sammeln, spezifischsten waehlen (repo= bzw.
   // ein nicht-generischer Prefix wie JUMO_TEST_REQUEST schlaegt bare TEST_REQUEST).
