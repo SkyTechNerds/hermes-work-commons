@@ -31,6 +31,11 @@ runs:
         PR_BASE: ${{ github.base_ref }}
         PR_COMMIT: ${{ github.event.pull_request.head.sha }}
         PR_URL: ${{ github.event.pull_request.html_url }}
+        ISSUE_NUMBER: ${{ github.event.issue.number }}
+        ISSUE_TITLE: ${{ github.event.issue.title }}
+        ISSUE_URL: ${{ github.event.issue.html_url }}
+        ISSUE_AUTHOR: ${{ github.event.issue.user.login }}
+        ISSUE_BODY: ${{ github.event.issue.body }}
         COMMENT_BODY: ${{ github.event.comment.body }}
         COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
         COMMENT_ID: ${{ github.event.comment.id }}
@@ -128,6 +133,33 @@ runs:
                   "footer": { "text": ($trigger + "_REVIEW_REPLY repo=" + $repo + " pr=" + $prnum + " comment=" + $cid) }
                 }]
               }')
+            ;;
+
+          issues)
+            # Neues Issue eröffnet — Community-Meldung, damit nichts ungesehen bleibt
+            PAYLOAD=$(jq -n \
+              --arg repo "$REPO_FULL" \
+              --arg num "$ISSUE_NUMBER" \
+              --arg title "$ISSUE_TITLE" \
+              --arg author "$ISSUE_AUTHOR" \
+              --arg body "$ISSUE_BODY" \
+              --arg url "$ISSUE_URL" \
+              --arg trigger "$TRIGGER_PREFIX" \
+              '{
+                "content": ($trigger + "_ISSUE repo=" + $repo + " issue=" + $num),
+                "embeds": [{
+                  "title": ("🐛 Neues Issue #" + $num + ": " + $title),
+                  "url": $url,
+                  "color": 15548997,
+                  "fields": [
+                    { "name": "Author", "value": $author, "inline": true },
+                    { "name": "Repo", "value": $repo, "inline": true },
+                    { "name": "Text", "value": (($body // "")[0:500]), "inline": false }
+                  ],
+                  "footer": { "text": ($trigger + "_ISSUE repo=" + $repo + " issue=" + $num) }
+                }]
+              }')
+            CONTENT="${TRIGGER_PREFIX}_ISSUE repo=${REPO_FULL} issue=${ISSUE_NUMBER}"
             ;;
 
           *)
