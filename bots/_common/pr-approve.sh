@@ -53,11 +53,18 @@ case "$MODE" in
     # Offene (unaufgeloeste) Bot-Review-Threads zaehlen.
     OPEN="$(gh api graphql -f query="{repository(owner:\"$OWNER\",name:\"$NAME\"){pullRequest(number:$PR){reviewThreads(first:100){nodes{isResolved isOutdated comments(first:1){nodes{author{login}}}}}}}}" \
       --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved==false and .isOutdated==false and (.comments.nodes[0].author.login=="the-codemole"))] | length' 2>/dev/null || echo -1)"
-    # Letzten Report-Kommentar auf ❌ (fehlgeschlagene Checks) pruefen.
-    FAILS="$(gh api "repos/$REPO/issues/$PR/comments" \
-      --jq '[.[] | select(.user.login=="the-codemole[bot]" and (.body|test("hermes-work:report")))] | last | .body' 2>/dev/null | grep -c '❌' || true)"
-    echo "AUTO $REPO#$PR: offene Bot-Threads=$OPEN, ❌-Checks=$FAILS"
-    if [ "${OPEN:--1}" = "0" ] && [ "${FAILS:-1}" -eq 0 ]; then
+    # Letzten Report-Kommentar holen.
+    REPORT="$(gh api "repos/$REPO/issues/$PR/comments" \
+      --jq '[.[] | select(.user.login=="the-codemole[bot]" and (.body|test("hermes-work:report")))] | last | .body' 2>/dev/null || true)"
+    # ❌ = fehlgeschlagene Checks.
+    FAILS="$(printf '%s' "$REPORT" | grep -c '❌' || true)"
+    # ⚠️-Warns von Checks OHNE Inline-Thread (hacs/translations) blocken auch — sonst
+    # waeren sie fuer auto unsichtbar (weder ❌ noch offener Thread). diff-size ist
+    # informativ (grosser Diff) -> blockt NICHT; inline-Warns (entity-exists etc.)
+    # laufen ueber die Thread-Zaehlung, damit Resolve-to-approve erhalten bleibt.
+    WARN_BLOCK="$(printf '%s' "$REPORT" | grep '⚠️' | grep -cE '\*\*(hacs|translations)\*\*' || true)"
+    echo "AUTO $REPO#$PR: offene Bot-Threads=$OPEN, ❌-Checks=$FAILS, Warn-Block=$WARN_BLOCK"
+    if [ "${OPEN:--1}" = "0" ] && [ "${FAILS:-1}" -eq 0 ] && [ "${WARN_BLOCK:-1}" -eq 0 ]; then
       do_approve
     else
       do_dismiss   # noch offene Punkte -> ggf. stale Approve zuruecknehmen
