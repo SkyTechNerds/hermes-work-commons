@@ -326,37 +326,26 @@ function checkJsLint(files) {
     : { name: 'JS Lint', ok: true, detail: `0 Fehler (${targets.length} Datei(en))` };
 }
 
-/** Auto-generierte CSS (Build-Artefakte wie styles/critical.css von build-css.mjs)
- *  nicht linten: der Header sagt "do not edit", die Datei wird nie von Hand angefasst,
- *  kosmetische Findings (at-rule-empty-line-before …) sind unactionable = False Positive. */
-function isGeneratedCss(abs) {
-  try {
-    const head = fs.readFileSync(abs, 'utf8').slice(0, 400).toLowerCase();
-    return /auto-generated|do not edit|@generated/.test(head);
-  } catch { return false; }
-}
-
-/** 4 — CSS Lint: Stylelint, bypasst .stylelintignore (ignoriert sonst alle CSS). */
+/** 4 — CSS Lint: Stylelint gegen die geaenderten CSS. Respektiert die projekt-
+ *  eigene .stylelintignore (schliesst generierte Bundles styles/critical.css /
+ *  deferred.css / icomoon.css + Vendor aus) — sonst False Positives auf Build-
+ *  Artefakten bei JEDEM PR (WCMS: at-rule-empty-line-before auf critical.css). */
 function checkCssLint(files) {
-  const cssFiles = files
+  const targets = files
     .filter((f) => f.status !== 'removed' && isCss(f.filename))
     .map((f) => f.filename)
     .filter((f) => fs.existsSync(path.join(REPO_DIR, f)));
-  const generated = cssFiles.filter((f) => isGeneratedCss(path.join(REPO_DIR, f)));
-  const targets = cssFiles.filter((f) => !generated.includes(f));
-  if (!targets.length) {
-    return { name: 'CSS Lint', ok: true,
-      detail: generated.length ? `${generated.length} generierte CSS übersprungen (nichts Handgeschriebenes geändert)` : 'Keine geänderten CSS-Dateien' };
-  }
+  if (!targets.length) return { name: 'CSS Lint', ok: true, detail: 'Keine geänderten CSS-Dateien' };
   let out; let execErr = null;
   try {
-    out = execFileSync('npx', ['--no-install', 'stylelint', ...targets, '--ignore-path', '/dev/null', '-f', 'json'],
+    out = execFileSync('npx', ['--no-install', 'stylelint', ...targets, '-f', 'json'],
       { cwd: REPO_DIR, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 180000 });
   } catch (e) {
     // Stylelint schreibt den JSON-Report bei Findings teils auf stderr (ältere Versionen: stdout)
     out = e.stdout && String(e.stdout).trim() ? e.stdout : e.stderr; execErr = e;
   }
   if (!out || !String(out).trim()) {
+    if (!execErr) return { name: 'CSS Lint', ok: true, detail: `Alle geänderten CSS per .stylelintignore ausgenommen (${targets.length})` };
     return { name: 'CSS Lint', ok: false, detail: `Stylelint konnte nicht ausgeführt werden: ${String(execErr && execErr.message || 'kein Output').slice(0, 300)}` };
   }
   let results;
@@ -365,6 +354,7 @@ function checkCssLint(files) {
   }
   const problems = [];
   for (const r of results) {
+    if (r.ignored) continue;
     for (const w of r.warnings || []) {
       const rel = path.relative(REPO_DIR, r.source);
       problems.push(`In ${rel} Zeile ${w.line}: ${w.text} (${w.rule})`);
@@ -372,7 +362,7 @@ function checkCssLint(files) {
   }
   return problems.length
     ? { name: 'CSS Lint', ok: false, detail: capProblems(problems) }
-    : { name: 'CSS Lint', ok: true, detail: `0 Fehler (${targets.length} Datei(en)${generated.length ? `, ${generated.length} generierte übersprungen` : ''})` };
+    : { name: 'CSS Lint', ok: true, detail: `0 Fehler (${targets.length} Datei(en))` };
 }
 
 /** 5 — Placeholder-Keys: literal-Key-Zugriffe gegen AEM-Placeholder-JSON. */
