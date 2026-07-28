@@ -51,8 +51,8 @@ case "$MODE" in
   dismiss) do_dismiss ;;
   auto)
     # Offene (unaufgeloeste) Bot-Review-Threads zaehlen.
-    OPEN="$(gh api graphql -f query="{repository(owner:\"$OWNER\",name:\"$NAME\"){pullRequest(number:$PR){reviewThreads(first:100){nodes{isResolved comments(first:1){nodes{author{login}}}}}}}}" \
-      --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved==false and (.comments.nodes[0].author.login=="the-codemole"))] | length' 2>/dev/null || echo -1)"
+    OPEN="$(gh api graphql -f query="{repository(owner:\"$OWNER\",name:\"$NAME\"){pullRequest(number:$PR){reviewThreads(first:100){nodes{isResolved isOutdated comments(first:1){nodes{author{login}}}}}}}}" \
+      --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved==false and .isOutdated==false and (.comments.nodes[0].author.login=="the-codemole"))] | length' 2>/dev/null || echo -1)"
     # Letzten Report-Kommentar auf ❌ (fehlgeschlagene Checks) pruefen.
     FAILS="$(gh api "repos/$REPO/issues/$PR/comments" \
       --jq '[.[] | select(.user.login=="the-codemole[bot]" and (.body|test("hermes-work:report")))] | last | .body' 2>/dev/null | grep -c '❌' || true)"
