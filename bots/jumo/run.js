@@ -326,13 +326,28 @@ function checkJsLint(files) {
     : { name: 'JS Lint', ok: true, detail: `0 Fehler (${targets.length} Datei(en))` };
 }
 
+/** Auto-generierte CSS (Build-Artefakte wie styles/critical.css von build-css.mjs)
+ *  nicht linten: der Header sagt "do not edit", die Datei wird nie von Hand angefasst,
+ *  kosmetische Findings (at-rule-empty-line-before …) sind unactionable = False Positive. */
+function isGeneratedCss(abs) {
+  try {
+    const head = fs.readFileSync(abs, 'utf8').slice(0, 400).toLowerCase();
+    return /auto-generated|do not edit|@generated/.test(head);
+  } catch { return false; }
+}
+
 /** 4 — CSS Lint: Stylelint, bypasst .stylelintignore (ignoriert sonst alle CSS). */
 function checkCssLint(files) {
-  const targets = files
+  const cssFiles = files
     .filter((f) => f.status !== 'removed' && isCss(f.filename))
     .map((f) => f.filename)
     .filter((f) => fs.existsSync(path.join(REPO_DIR, f)));
-  if (!targets.length) return { name: 'CSS Lint', ok: true, detail: 'Keine geänderten CSS-Dateien' };
+  const generated = cssFiles.filter((f) => isGeneratedCss(path.join(REPO_DIR, f)));
+  const targets = cssFiles.filter((f) => !generated.includes(f));
+  if (!targets.length) {
+    return { name: 'CSS Lint', ok: true,
+      detail: generated.length ? `${generated.length} generierte CSS übersprungen (nichts Handgeschriebenes geändert)` : 'Keine geänderten CSS-Dateien' };
+  }
   let out; let execErr = null;
   try {
     out = execFileSync('npx', ['--no-install', 'stylelint', ...targets, '--ignore-path', '/dev/null', '-f', 'json'],
@@ -357,7 +372,7 @@ function checkCssLint(files) {
   }
   return problems.length
     ? { name: 'CSS Lint', ok: false, detail: capProblems(problems) }
-    : { name: 'CSS Lint', ok: true, detail: `0 Fehler (${targets.length} Datei(en))` };
+    : { name: 'CSS Lint', ok: true, detail: `0 Fehler (${targets.length} Datei(en)${generated.length ? `, ${generated.length} generierte übersprungen` : ''})` };
 }
 
 /** 5 — Placeholder-Keys: literal-Key-Zugriffe gegen AEM-Placeholder-JSON. */
