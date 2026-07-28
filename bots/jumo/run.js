@@ -25,7 +25,7 @@
 
 'use strict';
 
-const { execSync, execFileSync } = require('node:child_process');
+const { execSync, execFileSync, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -336,16 +336,14 @@ function checkCssLint(files) {
     .map((f) => f.filename)
     .filter((f) => fs.existsSync(path.join(REPO_DIR, f)));
   if (!targets.length) return { name: 'CSS Lint', ok: true, detail: 'Keine geänderten CSS-Dateien' };
-  let out; let execErr = null;
-  try {
-    out = execFileSync('npx', ['--no-install', 'stylelint', ...targets, '-f', 'json'],
-      { cwd: REPO_DIR, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 180000 });
-  } catch (e) {
-    // Stylelint schreibt den JSON-Report bei Findings teils auf stderr (ältere Versionen: stdout)
-    out = e.stdout && String(e.stdout).trim() ? e.stdout : e.stderr; execErr = e;
-  }
+  // Stylelint schreibt den JSON-Report je nach Exit-Code auf stdout ODER stderr
+  // (bei exit 0 landet er auf stderr, stdout ist leer) -> spawnSync liest beides.
+  const proc = spawnSync('npx', ['--no-install', 'stylelint', ...targets, '-f', 'json'],
+    { cwd: REPO_DIR, encoding: 'utf8', timeout: 180000, maxBuffer: 20 * 1024 * 1024 });
+  const out = (proc.stdout && proc.stdout.trim()) ? proc.stdout : (proc.stderr || '');
+  const execErr = proc.error || (![0, 2].includes(proc.status) ? new Error(`stylelint exit ${proc.status}`) : null);
   if (!out || !String(out).trim()) {
-    if (!execErr) return { name: 'CSS Lint', ok: true, detail: `Alle geänderten CSS per .stylelintignore ausgenommen (${targets.length})` };
+    if (!execErr) return { name: 'CSS Lint', ok: true, detail: `0 Fehler (${targets.length} Datei(en))` };
     return { name: 'CSS Lint', ok: false, detail: `Stylelint konnte nicht ausgeführt werden: ${String(execErr && execErr.message || 'kein Output').slice(0, 300)}` };
   }
   let results;
