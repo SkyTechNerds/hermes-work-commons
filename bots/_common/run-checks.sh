@@ -78,7 +78,14 @@ git clean -fdq 2>/dev/null || true   # stale untracked Dateien (z.B. alte .codem
 # enthielte der Zwei-Punkt-Diff sonst die INVERSEN Base-Änderungen.
 export HEAD_SHA="$(git rev-parse refs/hermes/pr)"
 export BASE_SHA="$(git merge-base refs/hermes/base "$HEAD_SHA" 2>/dev/null || git rev-parse refs/hermes/base)"
-export DIFF_FILES="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
+# --name-status -M: reine Renames (R100, Inhalt identisch) ausschliessen — sonst
+# behandeln die Checks den ganzen verschobenen Datei-Inhalt als "neu" und flaggen
+# Bestands-Zeilen (PR #460: reiner Rename, 0 Zeilen geaendert, aber ❌ yamllint/secret).
+export DIFF_FILES="$(git diff --name-status -M "$BASE_SHA" "$HEAD_SHA" | awk -F'\t' '
+  $1 == "R100" { next }
+  $1 ~ /^[RC]/ { print $3; next }
+  { print $2 }
+')"
 [ -z "$DIFF_FILES" ] && { echo "EMPTY_DIFF" >&2; exit 0; }
 
 # PR-Sprache erkennen (de/en) — steuert Report- und Check-Meldungen
