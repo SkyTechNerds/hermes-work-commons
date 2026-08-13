@@ -86,7 +86,19 @@ export DIFF_FILES="$(git diff --name-status -M "$BASE_SHA" "$HEAD_SHA" | awk -F'
   $1 ~ /^[RC]/ { print $3; next }
   { print $2 }
 ')"
-[ -z "$DIFF_FILES" ] && { echo "EMPTY_DIFF" >&2; exit 0; }
+if [ -z "$DIFF_FILES" ]; then
+  # Keine inhaltlichen Aenderungen (reiner Rename / nur ignorierte oder geloeschte
+  # Dateien). Trotzdem einen sauberen Report posten (Upsert ueber post-comment.py)
+  # -> heilt einen evtl. vorherigen falschen Report und macht sichtbar, dass CodeMole lief.
+  export CODEMOLE_LANG="$(bash "$COMMON/detect-lang.sh" "$REPO" "$PR" 2>/dev/null || echo de)"
+  if [ "$CODEMOLE_LANG" = "en" ]; then EMPTY_MSG="No content changes to check (pure rename or only ignored/deleted files)."; else EMPTY_MSG="Keine inhaltlichen Änderungen zu prüfen (reiner Rename oder nur ignorierte/gelöschte Dateien)."; fi
+  EMPTY_RESULTS="/tmp/runchecks-$SLUG-$PR.json"; EMPTY_MD="/tmp/runchecks-$SLUG-$PR.md"
+  EMPTY_MSG="$EMPTY_MSG" EMPTY_RESULTS="$EMPTY_RESULTS" python3 -c 'import json,os;json.dump({"checks":[{"name":"diff-size","status":"skip","message":os.environ["EMPTY_MSG"]}]},open(os.environ["EMPTY_RESULTS"],"w"))'
+  python3 "$COMMON/render-report.py" "$EMPTY_RESULTS" "$BRANCH" "$BASE" "$EMPTY_MD"
+  [ "$MODE" = "post" ] && python3 "$COMMON/post-comment.py" "$REPO" "$PR" "$EMPTY_MD"
+  echo "EMPTY_DIFF (sauberer Report gepostet)" >&2
+  exit 0
+fi
 
 # PR-Sprache erkennen (de/en) — steuert Report- und Check-Meldungen
 export CODEMOLE_LANG="$(bash "$COMMON/detect-lang.sh" "$REPO" "$PR" 2>/dev/null || echo de)"
