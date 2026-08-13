@@ -31,7 +31,7 @@ def added_lines(f):
     if not base or not head:
         return None
     try:
-        out = subprocess.run(["git", "diff", "--unified=0", base, head, "--", f],
+        out = subprocess.run(["bash", os.environ["CM_COMMON"] + "/cm-file-diff.sh", f],
                              capture_output=True, text=True, timeout=30).stdout
     except Exception:
         return None

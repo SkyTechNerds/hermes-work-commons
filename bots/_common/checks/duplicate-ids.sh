@@ -9,7 +9,7 @@ if [ -n "${DIFF_FILES_FILE:-}" ] && [ -s "${DIFF_FILES_FILE:-}" ]; then
   mapfile -t _PF < "$DIFF_FILES_FILE"; PATHSPEC=(--)
   for _p in "${_PF[@]}"; do PATHSPEC+=(":(literal)$_p"); done
 fi
-mapfile -t NEW_IDS < <(git diff --unified=0 "$BASE_SHA" "$HEAD_SHA" "${PATHSPEC[@]}" \
+mapfile -t NEW_IDS < <(bash "$CM_COMMON/cm-file-diff.sh" "${_PF[@]}" \
   | grep -E '^\+[[:space:]]*-[[:space:]]+id:' \
   | sed -E "s/^\+[[:space:]]*-[[:space:]]+id:[[:space:]]*['\"]?([A-Za-z0-9_.-]+)['\"]?.*/\1/" \
   | grep -E '^[A-Za-z0-9_.-]+$' | sort -u || true)
@@ -23,7 +23,7 @@ done
 if [ -n "$DUP_IDS" ]; then
   ALT="$(echo $DUP_IDS | tr ' ' '|')"
   LABEL="$(t "Automation-ID mehrfach vergeben (überschreibt still eine andere)" "duplicate automation ID (silently overrides another)")"
-  [ -n "${CM_INLINE:-}" ] && git diff --unified=0 "$BASE_SHA" "$HEAD_SHA" "${PATHSPEC[@]}" \
+  [ -n "${CM_INLINE:-}" ] && bash "$CM_COMMON/cm-file-diff.sh" "${_PF[@]}" \
     | python3 "$D/diff-locate.py" "-\\s+id:\\s*['\"]?($ALT)\\b" --label "$LABEL" \
     | CM_CHECK=duplicate-ids CM_SEV=warn python3 "$D/to-inline.py" >> "$CM_INLINE" 2>/dev/null
   ND=$(echo $DUP_IDS | wc -w)

@@ -10,7 +10,7 @@ if [ -n "${DIFF_FILES_FILE:-}" ] && [ -s "${DIFF_FILES_FILE:-}" ]; then
   PATHSPEC=(--)
   for _p in "${_PF[@]}"; do PATHSPEC+=(":(literal)$_p"); done
 fi
-mapfile -t INCLUDE_REFS < <(git diff "$BASE_SHA" "$HEAD_SHA" "${PATHSPEC[@]}" \
+mapfile -t INCLUDE_REFS < <(bash "$CM_COMMON/cm-file-diff.sh" "${_PF[@]}" \
   | grep -oE '![[:space:]]*include(_dir_(list|named|merge_list|merge_named))?[[:space:]]+[^[:space:]]+' \
   | sed -E 's/^![[:space:]]*include(_dir_(list|named|merge_list|merge_named))?[[:space:]]+//;s/^["\x27]//;s/["\x27]$//' \
   | sort -u || true)

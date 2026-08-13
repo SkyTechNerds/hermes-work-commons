@@ -77,7 +77,7 @@ except Exception as e:
 missing = []
 seen = set()
 for f in os.environ["YAML_FILES"].split():
-    diff = subprocess.run(["git", "diff", "--unified=0", base, head, "--", f],
+    diff = subprocess.run(["bash", os.environ["CM_COMMON"] + "/cm-file-diff.sh", f],
                           capture_output=True, text=True).stdout
     lineno = 0
     for raw in diff.splitlines():

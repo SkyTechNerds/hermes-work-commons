@@ -10,7 +10,7 @@ if [ -n "${DIFF_FILES_FILE:-}" ] && [ -s "${DIFF_FILES_FILE:-}" ]; then
   for _p in "${_PF[@]}"; do PATHSPEC+=(":(literal)$_p"); done
 fi
 LABEL="$(t "übrig gebliebener Merge-Konflikt-Marker" "leftover merge conflict marker")"
-LOC="$(git diff --unified=0 "$BASE_SHA" "$HEAD_SHA" "${PATHSPEC[@]}" \
+LOC="$(bash "$CM_COMMON/cm-file-diff.sh" "${_PF[@]}" \
   | python3 "$D/diff-locate.py" '^(<{7}( |$)|={7}$|>{7}( |$))' --label "$LABEL")"
 N=$(printf '%s\n' "$LOC" | grep -c .)
 if [ "$N" -eq 0 ]; then

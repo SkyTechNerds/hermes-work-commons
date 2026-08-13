@@ -13,6 +13,7 @@
 #   Leerer/ungültiger Output oder Timeout (120s) -> warn-Eintrag im Report (nicht mehr still).
 set -uo pipefail
 COMMON="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export CM_COMMON="$COMMON"
 # shellcheck source=load-token.sh
 source "$COMMON/load-token.sh"
 

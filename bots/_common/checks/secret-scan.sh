@@ -18,7 +18,7 @@ if [ -n "${DIFF_FILES_FILE:-}" ] && [ -s "${DIFF_FILES_FILE:-}" ]; then
   for _p in "${_PF[@]}"; do PATHSPEC+=(":(literal)$_p"); done
 fi
 
-ADDED="$(git diff --unified=0 "$BASE_SHA" "$HEAD_SHA" "${PATHSPEC[@]}" | grep -E '^\+' | grep -vE '^\+\+\+' || true)"
+ADDED="$(bash "$CM_COMMON/cm-file-diff.sh" "${_PF[@]}" | grep -E '^\+' | grep -vE '^\+\+\+' || true)"
 [ -z "$ADDED" ] && { emit pass "$(t "Keine hinzugefügten Zeilen zu scannen" "No added lines to scan")"; exit 0; }
 
 ASSIGN='(password|passwd|api_key|apikey|access_key|auth_token|token|secret|client_secret)[[:space:]]*[:=][[:space:]]*'

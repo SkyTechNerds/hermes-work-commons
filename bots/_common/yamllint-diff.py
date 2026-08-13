@@ -30,7 +30,7 @@ rules:
 
 
 def added_lines(base, head, f):
-    diff = subprocess.run(["git", "diff", "--unified=0", base, head, "--", f],
+    diff = subprocess.run(["bash", os.environ["CM_COMMON"] + "/cm-file-diff.sh", f],
                           capture_output=True, text=True).stdout
     s = set()
     for m in re.finditer(r'^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@', diff, re.M):

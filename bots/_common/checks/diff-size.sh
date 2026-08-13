@@ -11,7 +11,7 @@ if [ -n "${DIFF_FILES_FILE:-}" ] && [ -s "${DIFF_FILES_FILE:-}" ]; then
   PATHSPEC=(--)
   for _p in "${_PF[@]}"; do PATHSPEC+=(":(literal)$_p"); done
 fi
-STATS="$(git diff --numstat "$BASE_SHA" "$HEAD_SHA" "${PATHSPEC[@]}" | awk '{a+=$1; r+=$2} END {print a+0, r+0}')"
+STATS="$(bash "$CM_COMMON/cm-file-diff.sh" "${_PF[@]}" | awk '/^\+/&&!/^\+\+\+/{a++} /^-/&&!/^---/{r++} END{print a+0, r+0}')"
 ADDED="${STATS%% *}"; REMOVED="${STATS##* }"
 FILES=$(printf '%s\n' "$DIFF_FILES" | grep -c .)
 if [ "$ADDED" -gt 1000 ] || [ "$FILES" -gt 30 ]; then ST=warn; PRE="$(t "Großer Diff: " "Large diff: ")"; else ST=pass; PRE="Diff "; fi
