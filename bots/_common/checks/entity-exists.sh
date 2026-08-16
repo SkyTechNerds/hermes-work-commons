@@ -74,6 +74,28 @@ except Exception as e:
     print("__HA_UNREACHABLE__ " + type(e).__name__)
     sys.exit(0)
 
+import unicodedata
+def _slug(x):
+    x = unicodedata.normalize("NFKD", x.strip().lower()).encode("ascii", "ignore").decode()
+    return re.sub(r"_+", "_", re.sub(r"[^a-z0-9_]+", "_", x)).strip("_")
+
+# Entities, die der PR SELBST anlegt, sind live noch nicht da -> nicht als "fehlt"
+# flaggen. Aus den geaenderten YAML-Dateien: name:-Werte (Template/Platform) -> slug,
+# object_id: direkt. Domain-agnostisch (Objekt-ID-Teil).
+defined = set()
+_NAME_RE = re.compile(r'''(?m)^\s*-?\s*name:\s*["']?([^"'\n#]+?)["']?\s*(?:#.*)?$''')
+_OID_RE = re.compile(r'''(?m)^\s*object_id:\s*["']?([a-z0-9_]+)''')
+for _f in os.environ["YAML_FILES"].split():
+    try:
+        _c = open(_f, encoding="utf-8", errors="ignore").read()
+    except Exception:
+        continue
+    for _nm in _NAME_RE.findall(_c):
+        _sl = _slug(_nm)
+        if _sl:
+            defined.add(_sl)
+    defined.update(_OID_RE.findall(_c))
+
 missing = []
 seen = set()
 for f in os.environ["YAML_FILES"].split():
@@ -94,7 +116,7 @@ for f in os.environ["YAML_FILES"].split():
             if re.match(r"^\s*-?\s*(action|service)\s*:", code):
                 continue
             for ent in ENT_RE.findall(code):
-                if ent not in live and ent not in seen:
+                if ent not in live and ent not in seen and ent.rsplit('.', 1)[-1] not in defined:
                     seen.add(ent)
                     suffix = "does not exist in the HA instance" if os.environ.get("CODEMOLE_LANG", "de") == "en" else "existiert nicht in der HA-Instanz"
                     missing.append(f"{f}:{lineno} `{ent}` {suffix}")
