@@ -24,13 +24,24 @@ elif [ -z "${GH_TOKEN:-}" ]; then
   export GH_TOKEN="$GITHUB_TOKEN"
 fi
 
+# Sprache der Bot-Meldungen an die PR-Sprache koppeln (detect-lang: Titel/Body-Heuristik
+# + .codemole.yml lang:). CODEMOLE_LANG aus dem Env hat Vorrang, sonst selbst erkennen.
+CM_LANG="${CODEMOLE_LANG:-$(bash "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/detect-lang.sh" "$REPO" "$PR" 2>/dev/null || echo de)}"
+if [ "$CM_LANG" = "en" ]; then
+  MSG_APPROVE="All checks passed, review clean. — CodeMole"
+  MSG_DISMISS="No longer clean — approval withdrawn."
+else
+  MSG_APPROVE="Alle Findings adressiert, Checks sauber. — CodeMole"
+  MSG_DISMISS="Nicht mehr sauber — Approve zurückgezogen."
+fi
+
 do_approve() {
   local sha; sha="$(gh api "repos/$REPO/pulls/$PR" --jq .head.sha 2>/dev/null)" || { echo "pr-approve: head-SHA nicht ermittelbar" >&2; return 1; }
   local n; n="$(gh api "repos/$REPO/pulls/$PR/reviews?per_page=100" \
         --jq "[.[] | select(.user.login==\"$BOT\" and .state==\"APPROVED\" and .commit_id==\"$sha\")] | length" 2>/dev/null || echo 0)"
   if [ "${n:-0}" -gt 0 ]; then echo "APPROVE-SKIP: schon approved fuer $sha"; return 0; fi
   gh api -X POST "repos/$REPO/pulls/$PR/reviews?per_page=100" \
-    -f event=APPROVE -f commit_id="$sha" -f body="${BODY:-Alle Findings adressiert, Checks sauber. — CodeMole}" \
+    -f event=APPROVE -f commit_id="$sha" -f body="${BODY:-$MSG_APPROVE}" \
     --jq '"APPROVED: " + (.html_url // "ok")'
 }
 
@@ -41,7 +52,7 @@ do_dismiss() {
   local id
   for id in $ids; do
     gh api -X PUT "repos/$REPO/pulls/$PR/reviews/$id/dismissals" \
-      -f message="${BODY:-Nicht mehr sauber — Approve zurueckgezogen.}" -f event=DISMISS \
+      -f message="${BODY:-$MSG_DISMISS}" -f event=DISMISS \
       --jq '"DISMISSED: \(.id)"' 2>/dev/null || echo "dismiss-fail id=$id" >&2
   done
 }

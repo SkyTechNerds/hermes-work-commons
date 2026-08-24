@@ -214,7 +214,7 @@ async function handlePullRequest(payload) {
   // erfasst auch Check-Inline-Findings (⚠️ warn), nicht nur ai-review (PR #397).
   if (runnerFail || reviewErr) {
     await run(path.join(BOTS_DIR, '_common', 'pr-approve.sh'),
-      [repo, String(pr), 'dismiss', 'Review/Runner fehlgeschlagen — kein Approve.'], token, project);
+      [repo, String(pr), 'dismiss'], token, project);
   } else {
     await run(path.join(BOTS_DIR, '_common', 'pr-approve.sh'), [repo, String(pr), 'auto'], token, project);
   }
