@@ -95,9 +95,11 @@ case "$MODE" in
   approve) do_approve ;;
   dismiss) do_dismiss ;;
   auto)
-    # Offene (unaufgeloeste) Bot-Review-Threads zaehlen.
-    OPEN="$(gh api graphql -f query="{repository(owner:\"$OWNER\",name:\"$NAME\"){pullRequest(number:$PR){reviewThreads(first:100){nodes{isResolved isOutdated comments(first:1){nodes{author{login}}}}}}}}" \
-      --jq "[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved==false and .isOutdated==false and (.comments.nodes[0].author.login==\"$BOT_GQL\"))] | length" 2>/dev/null || echo -1)"
+    # Review-Threads EINMAL holen und daraus offene UND erledigte zaehlen — die
+    # erledigten braucht die Abschlussmeldung ("N Findings adressiert").
+    GQL="$(gh api graphql -f query="{repository(owner:\"$OWNER\",name:\"$NAME\"){pullRequest(number:$PR){reviewThreads(first:100){nodes{isResolved isOutdated comments(first:1){nodes{author{login}}}}}}}}" 2>/dev/null || echo '{}')"
+    OPEN="$(printf '%s' "$GQL" | jq "[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved==false and .isOutdated==false and (.comments.nodes[0].author.login==\"$BOT_GQL\"))] | length" 2>/dev/null || echo -1)"
+    DONE_N="$(printf '%s' "$GQL" | jq "[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved==true and (.comments.nodes[0].author.login==\"$BOT_GQL\"))] | length" 2>/dev/null || echo 0)"
     # Letzten Report-Kommentar holen.
     REPORT="$(gh api "repos/$REPO/issues/$PR/comments" \
       --jq "[.[] | select(.user.login==\"$BOT\" and (.body|test(\"hermes-work:report\")))] | last | .body" 2>/dev/null || true)"
@@ -110,6 +112,22 @@ case "$MODE" in
     WARN_BLOCK="$(printf '%s' "$REPORT" | grep '⚠️' | grep -cE '\*\*(hacs|translations)\*\*' || true)"
     echo "AUTO $REPO#$PR: offene Bot-Threads=$OPEN, ❌-Checks=$FAILS, Warn-Block=$WARN_BLOCK"
     if [ "${OPEN:--1}" = "0" ] && [ "${FAILS:-1}" -eq 0 ] && [ "${WARN_BLOCK:-1}" -eq 0 ]; then
+      # Abschlussmeldung mit konkreten Zahlen statt nur "sauber" — sie ist der Text,
+      # den GitHub unter "approved these changes" anzeigt, also der sichtbare Abschluss.
+      OKN="$(printf '%s' "$REPORT" | grep -c '✅' || true)"
+      SKN="$(printf '%s' "$REPORT" | grep -c '⚪' || true)"
+      if [ "$CM_LANG" = "en" ]; then
+        SUM="**Approved — review complete.**"
+        [ "${OKN:-0}" -gt 0 ] && SUM="$SUM"$'\n'"- Checks: ${OKN} passed, ${SKN} skipped, 0 failed"
+        [ "${DONE_N:-0}" -gt 0 ] && SUM="$SUM"$'\n'"- ${DONE_N} finding(s) addressed, no open threads"
+        [ "${DONE_N:-0}" -eq 0 ] && SUM="$SUM"$'\n'"- No findings, no open threads"
+      else
+        SUM="**Freigegeben — Review abgeschlossen.**"
+        [ "${OKN:-0}" -gt 0 ] && SUM="$SUM"$'\n'"- Checks: ${OKN} grün, ${SKN} übersprungen, 0 fehlgeschlagen"
+        [ "${DONE_N:-0}" -gt 0 ] && SUM="$SUM"$'\n'"- ${DONE_N} Finding(s) adressiert, keine offenen Punkte"
+        [ "${DONE_N:-0}" -eq 0 ] && SUM="$SUM"$'\n'"- Keine Findings, keine offenen Punkte"
+      fi
+      BODY="$SUM"$'\n'"<!-- codemole:bot -->"
       do_approve
     else
       do_dismiss   # noch offene Punkte -> ggf. stale Approve zuruecknehmen
