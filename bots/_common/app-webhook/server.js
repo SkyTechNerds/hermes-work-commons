@@ -298,11 +298,12 @@ async function handlePullRequest(payload) {
   // Approve/Dismiss: Review-/Runner-Fehler blocken hart; sonst entscheidet
   // pr-approve.sh auto anhand OFFENER (nicht-outdated) Bot-Threads + ❌-Checks —
   // erfasst auch Check-Inline-Findings (⚠️ warn), nicht nur ai-review (PR #397).
-  if (runnerFail || reviewErr) {
-    await run(path.join(BOTS_DIR, '_common', 'pr-approve.sh'),
-      [repo, String(pr), 'dismiss'], token, project);
-  } else {
-    await run(path.join(BOTS_DIR, '_common', 'pr-approve.sh'), [repo, String(pr), 'auto'], token, project);
+  // Ergebnis MITLOGGEN: der Push-Pfad entschied bisher stumm ueber Approve/Dismiss —
+  // bei "Checks liefen, aber kein Approve" stand im Log nicht, warum (faceid#16).
+  {
+    const _mode = (runnerFail || reviewErr) ? 'dismiss' : 'auto';
+    const _ap = await run(path.join(BOTS_DIR, '_common', 'pr-approve.sh'), [repo, String(pr), _mode], token, project);
+    log(`approve ${repo}#${pr} (${_mode}): ${(_ap.out || '').trim().replace(/\n/g, ' | ').slice(-200)} [exit ${_ap.code}]`);
   }
   // Sichtbare Status-Zeile AUF dem PR: bei KI-Review-Fehler eine Warnung setzen,
   // bei Erfolg/Erholung eine evtl. stehende Warnung wieder entfernen. Gesunde

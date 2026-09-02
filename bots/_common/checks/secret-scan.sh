@@ -22,11 +22,18 @@ ADDED="$(bash "$CM_COMMON/cm-file-diff.sh" "${_PF[@]}" | grep -E '^\+' | grep -v
 [ -z "$ADDED" ] && { emit pass "$(t "Keine hinzugefügten Zeilen zu scannen" "No added lines to scan")"; exit 0; }
 
 ASSIGN='(password|passwd|api_key|apikey|access_key|auth_token|token|secret|client_secret)[[:space:]]*[:=][[:space:]]*'
+# Der Filter unten prueft die bestehende Wortliste irgendwo in der Zeile. Zusaetzlich
+# braucht es Platzhalter, die als VOLLSTAENDIGER Wert stehen — allen voran das Wort
+# "secret" selbst (`password: secret` in einer README ist ein Doku-Beispiel, kein Leak;
+# faceid#16 wurde genau daran blockiert). Nur wenn der GANZE Wert so ein Wort ist,
+# sonst wuerde "secret" im Wert ein echtes Fundstueck verstecken.
+PLACEHOLDER_VAL='["'"'"']?(secret|password|passwd|geheim|hunter2|changeit|topsecret|mysecret|notreal|sample|demo|foobar)["'"'"']?[[:space:]]*$'
 # quoted (>=6 Zeichen) oder unquoted (>=6 Zeichen); Templates/Referenzen/Platzhalter raus
 HITS_ASSIGN="$(printf '%s\n' "$ADDED" \
   | grep -iE "${ASSIGN}([\"'][^\"'\$]{6,}[\"']|[A-Za-z0-9_/+=.-]{6,}([[:space:]]|\$))" \
   | grep -vE '^\+[[:space:]]*#' \
-  | grep -viE '!secret|\$\{|\{\{|\{%|!env_var|<[A-Za-z_-]+>|(example|changeme|placeholder|redacted|dummy|xxxx|your[_-])' || true)"
+  | grep -viE '!secret|\$\{|\{\{|\{%|!env_var|<[A-Za-z_-]+>|(example|changeme|placeholder|redacted|dummy|xxxx|your[_-])' \
+  | grep -viE "${ASSIGN}${PLACEHOLDER_VAL}" || true)"
 
 HITS_KNOWN="$(printf '%s\n' "$ADDED" \
   | grep -E 'gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{22,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|-----BEGIN ([A-Z]+ )?PRIVATE KEY|eyJ[A-Za-z0-9_-]{17,}\.eyJ[A-Za-z0-9_-]{10,}|sk-[A-Za-z0-9]{32,}' \
