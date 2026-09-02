@@ -91,6 +91,11 @@ function inject(event, payload, deliveryId) {
   });
 }
 
+// Bot-eigene Texte tragen einen unsichtbaren HTML-Marker. Im PAT-Modus teilen sich
+// Bot und Mensch EINEN Account — nach Login zu filtern wuerde deshalb auch die echten
+// Kommentare des Menschen verwerfen (er koennte den Bot nie ansprechen).
+const BOT_MARK_RE = /<!--\s*(codemole:bot|hermes-work:(report|ai-status)|cm-inline:)/i;
+
 const numFromUrl = u => { const m = /\/(\d+)$/.exec(u || ''); return m ? parseInt(m[1], 10) : null; };
 
 (async () => {
@@ -103,7 +108,6 @@ const numFromUrl = u => { const m = /\/(\d+)$/.exec(u || ''); return m ? parseIn
   for (const [owner, tokenPath] of Object.entries(owners)) {
     let token;
     try { token = fs.readFileSync(tokenPath, 'utf8').trim(); } catch { log(`kein Token fuer ${owner} (${tokenPath})`); continue; }
-    const me = (await api('/user', token).catch(() => ({}))).login || null;
     const repos = repoMap[owner] || [];
     if (!repos.length) { log(`${owner}: keine Repos in pat-repos.json`); continue; }
 
@@ -125,7 +129,7 @@ const numFromUrl = u => { const m = /\/(\d+)$/.exec(u || ''); return m ? parseIn
         for (const c of (Array.isArray(rc) ? rc : [])) {
           if (seen.has('r' + c.id)) continue;
           seen.add('r' + c.id);
-          if (me && c.user && c.user.login === me) continue;       // eigener Kommentar (Loop-Schutz)
+          if (BOT_MARK_RE.test(c.body || '')) continue;             // eigener Text (Marker) -> Loop-Schutz
           if (!c.in_reply_to_id) continue;                          // nur Thread-Antworten
           const pr = numFromUrl(c.pull_request_url);
           if (!pr) continue;
@@ -142,7 +146,7 @@ const numFromUrl = u => { const m = /\/(\d+)$/.exec(u || ''); return m ? parseIn
         for (const c of (Array.isArray(ic) ? ic : [])) {
           if (seen.has('i' + c.id)) continue;
           seen.add('i' + c.id);
-          if (me && c.user && c.user.login === me) continue;
+          if (BOT_MARK_RE.test(c.body || '')) continue;             // eigener Text (Marker)
           if (!/@(the-)?codemole/i.test(c.body || '')) continue;
           const nr = numFromUrl(c.issue_url);
           if (!nr) continue;
