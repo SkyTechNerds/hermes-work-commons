@@ -13,6 +13,14 @@ CLAUDE_TOOL_LOCKDOWN=(--disallowedTools "Bash,Read,Write,Edit,NotebookEdit,Glob,
 
 # Nur auf Threads des EIGENEN Bots antworten (nicht auf fremde Bots wie dependabot).
 BOT_LOGINS="${CODEMOLE_BOT_LOGINS:-the-codemole[bot]}"
+# Im PAT-Modus (Owner ohne App-Installation, z.B. JUMO) stammen die Findings nicht
+# von `the-codemole[bot]`, sondern vom PAT-Inhaber — sonst erkennt ai-reply die
+# EIGENEN Findings nicht und antwortet nie. `gh api user` schlaegt mit einem
+# Installation-Token fehl (403, JSON auf stdout!) -> Login streng validieren.
+_WHO="$(gh api user -q .login 2>/dev/null || true)"
+if printf '%s' "${_WHO:-}" | grep -qE '^[A-Za-z0-9][A-Za-z0-9-]{0,38}$'; then
+  BOT_LOGINS="$BOT_LOGINS,$_WHO"
+fi
 
 # Vorgegebenes Env-Token (App-Installation) hat Vorrang; sonst PAT laden.
 if [ -z "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ]; then
@@ -31,11 +39,21 @@ PARENT_ID="$(printf '%s' "$REPLY_JSON" | python3 -c 'import sys,json;print(json.
 PARENT_JSON="$(gh api "repos/$REPO/pulls/comments/$PARENT_ID" 2>/dev/null)" || { echo "ai-reply: parent $PARENT_ID nicht abrufbar"; exit 0; }
 PTYPE="$(printf '%s' "$PARENT_JSON" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("user",{}).get("type",""))')"
 PLOGIN="$(printf '%s' "$PARENT_JSON" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("user",{}).get("login",""))')"
-[ "$PTYPE" != "Bot" ] && { echo "ai-reply: Parent nicht vom Bot ($PTYPE) — ignoriert"; exit 0; }
+# Der Parent muss ein Finding von UNS sein. Frueher wurde dafuer user.type=="Bot"
+# verlangt — das gilt nur im App-Modus. Im PAT-Modus (Owner ohne App-Installation,
+# z.B. JUMO) postet ein NORMALER User, sonst haette ai-reply dort nie geantwortet.
+# Massgeblich ist deshalb der LOGIN (BOT_LOGINS), nicht der Account-Typ.
 case ",$BOT_LOGINS," in
   *",$PLOGIN,"*) : ;;
-  *) echo "ai-reply: Parent von fremdem Bot ($PLOGIN) — ignoriert"; exit 0 ;;
+  *) echo "ai-reply: Parent nicht von uns ($PLOGIN, type=${PTYPE:-?}) — ignoriert"; exit 0 ;;
 esac
+# Der Login allein genuegt im PAT-Modus NICHT: dort schreibt der Mensch unter
+# derselben Identitaet. Ein echtes Bot-Finding ist es nur, wenn der Parent entweder
+# ein Bot-Account ist (App-Modus) oder unseren unsichtbaren Marker traegt.
+PBODY="$(printf '%s' "$PARENT_JSON" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("body") or "")')"
+if [ "$PTYPE" != "Bot" ] && ! printf '%s' "$PBODY" | grep -qE '<!-- *(codemole:bot|cm-inline:)'; then
+  echo "ai-reply: Parent ist ein menschlicher Kommentar (kein Bot-Marker) — ignoriert"; exit 0
+fi
 
 RESP="$(REPLY_JSON="$REPLY_JSON" PARENT_JSON="$PARENT_JSON" python3 <<'PY' | claude -p "${CLAUDE_TOOL_LOCKDOWN[@]}" 2>/dev/null
 import os, json
@@ -75,6 +93,11 @@ fi
 # LLM-Output begrenzen + @mentions neutralisieren, bevor er als Kommentar rausgeht.
 RESP="$(printf '%s' "$RESP" | python3 -c 'import sys,re;print(re.sub(r"@(?=\w)", "@​", sys.stdin.read()[:1500]).strip())')"
 
+# Unsichtbarer Herkunfts-Marker (HTML-Kommentar -> GitHub rendert nichts). Noetig,
+# weil im PAT-Modus Bot und Mensch DENSELBEN Account teilen: nur daran laesst sich
+# maschinell unterscheiden, was der Bot geschrieben hat und was ein echter User.
+RESP="$RESP
+<!-- codemole:bot -->"
 if gh api -X POST "repos/$REPO/pulls/$PR/comments/$PARENT_ID/replies" -f body="$RESP" >/dev/null 2>&1; then
   echo "ai-reply: geantwortet auf #$PR (thread $PARENT_ID)"
 else

@@ -36,6 +36,8 @@ const RUNS_IN_FLIGHT = new Set();
 // muss er NACH dem Lauf nachgeholt werden — sonst geht eine Thread-Aufloesung,
 // die mitten im Lauf passiert, verloren und der PR bleibt un-approved (PR #376).
 const PENDING_REEVAL = new Set();
+// Projekte mit bereits eingerichtetem Arbeitsverzeichnis (inkl. node_modules).
+const PROJECT_WORKDIR = { jumo: '/opt/jumo-cms' };
 const PORT = parseInt(process.env.PORT || '3956', 10);
 const LOG = process.env.HERMES_APP_LOG || '/var/log/hermes-work-app.log';
 const WORKROOT = process.env.HERMES_APP_WORKROOT || '/opt/hermes-app-workdir';
@@ -94,6 +96,62 @@ function makeAppJwt() {
   return `${data}.${b64url(sig)}`;
 }
 
+// --- PAT-Modus: Owner OHNE App-Installation (z.B. JUMO) --------------------
+// Nicht jede Org darf/will die GitHub App installieren. Fuer solche Owner liegt
+// ein PAT unter <CONF_DIR>/pat/<owner>.token (chmod 600). Der Handler faehrt dann
+// exakt dieselbe Pipeline (Checks, ai-review, Replies, Mention-Q&A, Approve);
+// die Events liefert nicht GitHub, sondern pat-poll.js (dort kein Webhook moeglich).
+const PAT_DIR = path.join(CONF_DIR, 'pat');
+// Zwei Wege, bewusst ohne Secret-Duplikate: (1) <CONF_DIR>/pat-owners.json mappt
+// Owner -> PFAD einer bestehenden Token-Datei (nichts wird kopiert), (2) sonst die
+// Konvention <CONF_DIR>/pat/<owner>.token. Beides chmod-600-Dateien ausserhalb des Repos.
+let PAT_MAP = {};
+try { PAT_MAP = JSON.parse(fs.readFileSync(path.join(CONF_DIR, 'pat-owners.json'), 'utf8')); } catch {}
+function patFor(owner) {
+  const p = PAT_MAP[owner];
+  if (p) {
+    try { return fs.readFileSync(p, 'utf8').trim() || null; } catch { return null; }
+  }
+  try { return fs.readFileSync(path.join(PAT_DIR, `${owner}.token`), 'utf8').trim() || null; }
+  catch { return null; }
+}
+function hasToken(installationId, repo) {
+  return !!(installationId || patFor((repo || '').split('/')[0]));
+}
+// App-Installation-Token, sonst PAT des Owners.
+async function resolveToken(installationId, repo) {
+  if (installationId) return installationToken(installationId);
+  const owner = (repo || '').split('/')[0];
+  const tk = patFor(owner);
+  if (!tk) throw new Error(`kein Token (weder installation.id noch PAT fuer ${owner})`);
+  return tk;
+}
+// Identitaet des PAT. Im PAT-Modus postet der Bot als NORMALER User, nicht als
+// App-Bot -> der `user.type === 'Bot'`-Loop-Schutz greift NICHT. Ohne diese
+// Pruefung wuerde der Handler auf seine EIGENEN Kommentare antworten (Endlos-Loop).
+const PAT_LOGIN = new Map();
+async function patLogin(owner) {
+  if (PAT_LOGIN.has(owner)) return PAT_LOGIN.get(owner);
+  const tk = patFor(owner);
+  let login = null;
+  if (tk) { try { const u = await ghGetJson('/user', tk); login = (u && u.login) || null; } catch {} }
+  PAT_LOGIN.set(owner, login);
+  return login;
+}
+// Jeder vom Bot geschriebene Text traegt einen unsichtbaren HTML-Marker:
+//   Report <!-- hermes-work:report -->, Inline-Finding <!-- cm-inline:... -->,
+//   Status <!-- hermes-work:ai-status -->, Reply/Antwort/Approve <!-- codemole:bot -->.
+// GitHub rendert HTML-Kommentare nicht -> fuer Leser unsichtbar, fuer uns eindeutig.
+const BOT_MARK_RE = /<!--\s*(codemole:bot|hermes-work:(report|ai-status)|cm-inline:)/i;
+
+// WICHTIG: Im PAT-Modus teilen sich Bot und Mensch EINEN Account. Ein Loop-Schutz
+// ueber den Login wuerde deshalb auch die ECHTEN Kommentare des Menschen verwerfen —
+// er koennte den Bot nie ansprechen. Massgeblich ist darum der Marker, nicht der Autor.
+async function isOwnComment(c, repo) {
+  if (c && c.user && c.user.type === 'Bot') return true;
+  return BOT_MARK_RE.test((c && c.body) || '');
+}
+
 function installationToken(installationId) {
   const jwt = makeAppJwt();
   return new Promise((resolve, reject) => {
@@ -129,7 +187,11 @@ function run(script, args, token, project) {
       ...process.env,
       GH_TOKEN: token,
       GITHUB_TOKEN: token,
-      REPO_DIR: path.join(WORKROOT, project),  // eigener Workdir (kein Listener-Race)
+      // Eigener Workdir je Projekt (kein Listener-Race) — AUSSER wo ein Projekt
+      // schon einen eingerichteten Workdir hat: JUMO braucht die dort installierten
+      // node_modules (eslint/stylelint), sonst faellt JS-Lint mit "missing packages"
+      // aus. Beide Pfade serialisieren ueber dieselbe Lock-Datei ($REPO_DIR.lock).
+      REPO_DIR: PROJECT_WORKDIR[project] || path.join(WORKROOT, project),
     };
     const p = spawn('bash', [script, ...args], { env, cwd: BOTS_DIR, timeout: 600000 });
     let out = '';
@@ -137,6 +199,30 @@ function run(script, args, token, project) {
     p.stderr.on('data', d => out += d);
     p.on('close', code => resolve({ code, out }));
     p.on('error', () => resolve({ code: -1, out }));
+  });
+}
+
+// Wie run(), aber startet python3 statt bash (fuer .py-Helfer wie post-comment.py).
+function runPy(argv, token) {
+  return new Promise((resolve) => {
+    const env = { ...process.env, GH_TOKEN: token, GITHUB_TOKEN: token };
+    const p = spawn('python3', argv, { env, cwd: BOTS_DIR, timeout: 60000 });
+    let out = '';
+    p.stdout.on('data', d => out += d);
+    p.stderr.on('data', d => out += d);
+    p.on('close', code => resolve({ code, out }));
+    p.on('error', () => resolve({ code: -1, out }));
+  });
+}
+
+// GitHub GET -> JSON (fuer recheck: PR-Daten holen, um handlePullRequest zu speisen).
+function ghGetJson(apiPath, token) {
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      host: 'api.github.com', path: apiPath, method: 'GET',
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'hermes-work-app' },
+    }, r => { let d = ''; r.on('data', c => d += c); r.on('end', () => { try { resolve(JSON.parse(d)); } catch (e) { reject(e); } }); });
+    req.on('error', reject); req.end();
   });
 }
 
@@ -156,7 +242,7 @@ async function handlePullRequest(payload) {
     return;
   }
   if (prData.draft) { log(`skip ${repo}#${pr}: draft`); return; }
-  if (!installationId) { log(`skip ${repo}#${pr}: keine installation.id`); return; }
+  if (!hasToken(installationId, repo)) { log(`skip ${repo}#${pr}: kein Token (keine installation.id, kein PAT)`); return; }
   if (!project || !branch) { log(`skip ${repo}#${pr}: project/branch fehlt`); return; }
   if (!validRef(branch) || !validRef(base)) {
     log(`skip ${repo}#${pr}: ungültiger Ref-Name (branch/base)`); return;
@@ -166,7 +252,7 @@ async function handlePullRequest(payload) {
   }
 
   let token;
-  try { token = await installationToken(installationId); }
+  try { token = await resolveToken(installationId, repo); }
   catch (e) { log(`token-fail ${repo}#${pr}: ${e.message}`); return; }
 
   log(`run ${repo}#${pr} (${branch} -> ${base}, project=${project})`);
@@ -218,6 +304,23 @@ async function handlePullRequest(payload) {
   } else {
     await run(path.join(BOTS_DIR, '_common', 'pr-approve.sh'), [repo, String(pr), 'auto'], token, project);
   }
+  // Sichtbare Status-Zeile AUF dem PR: bei KI-Review-Fehler eine Warnung setzen,
+  // bei Erfolg/Erholung eine evtl. stehende Warnung wieder entfernen. Gesunde
+  // PRs bekommen KEINEN Zusatz-Kommentar (Delete ist no-op ohne Vorgaenger).
+  const AI_MARK = '<!-- hermes-work:ai-status -->';
+  const pc = path.join(BOTS_DIR, '_common', 'post-comment.py');
+  if (reviewErr) {
+    const em2 = review.out.match(/AI-REVIEW-ERROR:\s*([^\n]+)/);
+    const reason2 = (em2 ? em2[1] : `exit ${review.code}`).slice(0, 140);
+    const md = `${AI_MARK}\n> [!WARNING]\n> **KI-Logik-Review konnte nicht laufen** \u2014 Infrastruktur/Auth (${now}).\n> Die strukturellen Checks oben sind vollst\u00e4ndig; der inhaltliche Review wird automatisch nachgeholt, sobald behoben. Kein Handeln n\u00f6tig.\n> <sub>Grund: ${reason2}</sub>`;
+    const tmp = path.join('/tmp', `cm-aistatus-${repo.replace('/', '_')}-${pr}.md`);
+    fs.writeFileSync(tmp, md);
+    const rst = await runPy([pc, repo, String(pr), tmp, AI_MARK], token);
+    log(`ai-status ${repo}#${pr}: WARN gesetzt \u2014 ${(rst.out||'').trim().slice(-80)}`);
+  } else if (!reviewSkip) {
+    const rst = await runPy([pc, repo, String(pr), '/dev/null', AI_MARK, '--delete'], token);
+    log(`ai-status ${repo}#${pr}: bereinigt \u2014 ${(rst.out||'').trim().slice(-60)}`);
+  }
   if (reviewErr || runnerFail) {
     const head = reviewErr ? 'CODE-REVIEW FEHLGESCHLAGEN' : 'TEST-RUNNER FEHLGESCHLAGEN';
     const detail = reviewErr ? reviewLine.replace('🔍 Review: ⚠️ FEHLGESCHLAGEN — ', '') : 'run-checks brach ab (Clone/Fetch/Checkout/Lock?)';
@@ -244,11 +347,11 @@ async function handleReviewComment(payload) {
   const installationId = payload.installation && payload.installation.id;
 
   if (!c.in_reply_to_id) { log(`skip reply ${repo}#${pr}: kein Reply (Top-Level)`); return; }
-  if (c.user && c.user.type === 'Bot') { log(`skip reply ${repo}#${pr}: Bot-Autor (Loop-Schutz)`); return; }
-  if (!installationId || !pr) return;
+  if (await isOwnComment(c, repo)) { log(`skip reply ${repo}#${pr}: eigener Kommentar (Loop-Schutz)`); return; }
+  if (!pr || !hasToken(installationId, repo)) return;
 
   let token;
-  try { token = await installationToken(installationId); }
+  try { token = await resolveToken(installationId, repo); }
   catch (e) { log(`reply token-fail ${repo}#${pr}: ${e.message}`); return; }
 
   log(`reply ${repo}#${pr} on comment ${c.id} (-> ${c.in_reply_to_id})`);
@@ -272,15 +375,33 @@ async function handleIssueComment(payload) {
   const c = payload.comment || {};
   const pr = payload.issue && payload.issue.number;
   const installationId = payload.installation && payload.installation.id;
-  if (!pr || !installationId) return;
-  if (c.user && c.user.type === 'Bot') { log(`skip comment ${repo}#${pr}: Bot-Autor (Loop-Schutz)`); return; }
-  if (!/@the-codemole/i.test(c.body || '')) { log(`skip comment ${repo}#${pr}: keine Mention`); return; }
+  if (!pr || !hasToken(installationId, repo)) return;
+  if (await isOwnComment(c, repo)) { log(`skip comment ${repo}#${pr}: eigener Kommentar (Loop-Schutz)`); return; }
+  // @the-codemole (App-Modus) ODER @codemole — im PAT-Modus gibt es keinen Bot-User,
+  // dort ist die Mention reiner Text-Trigger.
+  if (!/@(the-)?codemole/i.test(c.body || '')) { log(`skip comment ${repo}#${pr}: keine Mention`); return; }
 
   let token;
-  try { token = await installationToken(installationId); }
+  try { token = await resolveToken(installationId, repo); }
   catch (e) { log(`comment token-fail ${repo}#${pr}: ${e.message}`); return; }
 
   log(`comment ${repo}#${pr}: Mention von ${c.user && c.user.login} (comment ${c.id})`);
+
+  // `@the-codemole recheck` (auch re-run/rerun/neu pruefen/neu starten) = echter
+  // Re-Run der Pipeline statt Q&A. Nur wenn der Kommentar IM KERN das Kommando ist
+  // (Mention weggestrippt), damit "kannst du X re-checken?" weiter Q&A bleibt.
+  const _cmd = (c.body || '').replace(/@(the-)?codemole/ig, '').trim();
+  if (/^(please\s+|bitte\s+)?(re-?check|re-?run|rerun|check\s+again|neu\s*(pr[\u00fcu]fen|starten|laufen|checken))[\s.!]*$/i.test(_cmd)) {
+    if (RUNS_IN_FLIGHT.has(`${repo}#${pr}`)) { log(`recheck ${repo}#${pr}: Lauf bereits aktiv \u2014 ignoriert`); return; }
+    let prData;
+    try { prData = await ghGetJson(`/repos/${repo}/pulls/${pr}`, token); }
+    catch (e) { log(`recheck ${repo}#${pr}: PR-Fetch fehlgeschlagen: ${e.message}`); return; }
+    if (!prData || prData.state !== 'open') { log(`recheck ${repo}#${pr}: PR nicht offen (state=${prData && prData.state})`); return; }
+    log(`recheck ${repo}#${pr}: voller Re-Run angestossen von ${c.user && c.user.login}`);
+    await handlePullRequest({ repository: payload.repository, number: pr, pull_request: prData, installation: payload.installation });
+    return;
+  }
+
   const out = await run(path.join(BOTS_DIR, '_common', 'ai-comment.sh'),
     [repo, String(pr), String(c.id)], token, projectForRepo(repo));
   log(`ai-comment ${repo}#${pr}: ${out.out.slice(-120).replace(/\n/g, ' ')}`);
@@ -323,10 +444,10 @@ async function handleLighthouse(payload) {
   const branch = prData.head && prData.head.ref;
   const base = (prData.base && prData.base.ref) || 'main';
   const installationId = payload.installation && payload.installation.id;
-  if (prData.state !== 'open' || !pr || !branch || !installationId) return;
+  if (prData.state !== 'open' || !pr || !branch || !hasToken(installationId, repo)) return;
 
   let token;
-  try { token = await installationToken(installationId); }
+  try { token = await resolveToken(installationId, repo); }
   catch (e) { log(`lighthouse token-fail ${repo}#${pr}: ${e.message}`); return; }
 
   log(`lighthouse ${repo}#${pr} (Label-Trigger, ${branch} vs ${base})`);

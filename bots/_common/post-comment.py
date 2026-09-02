@@ -8,7 +8,15 @@ Reports anderer Repos landeten auf homeassistant-config).
 - Update-in-place: existiert schon ein Report-Kommentar (Marker), wird er per
   PATCH aktualisiert statt bei jedem synchronize-Push neu zu fluten.
 
-Usage: post-comment.py <owner/repo> <pr> <report.md>
+Usage: post-comment.py <owner/repo> <pr> <report.md> [marker] [--update-only|--delete]
+
+  marker         Optionaler HTML-Kommentar-Marker (Default: Report-Marker). So
+                 lassen sich mehrere unabhaengige Kommentare (z.B. AI-Review-
+                 Status) getrennt upserten.
+  --update-only  Nur patchen, wenn schon ein Kommentar mit dem Marker existiert;
+                 sonst NICHTS tun (kein Neu-Anlegen).
+  --delete       Existierenden Marker-Kommentar loeschen (report.md wird ignoriert,
+                 z.B. /dev/null uebergeben); no-op, wenn keiner existiert.
 """
 import json
 import os
@@ -17,7 +25,7 @@ import sys
 import urllib.request
 import urllib.error
 
-MARKER = "<!-- hermes-work:report -->"
+REPORT_MARKER = "<!-- hermes-work:report -->"
 API = "https://api.github.com"
 
 
@@ -34,13 +42,19 @@ def gh(method, path, data=None, token=None):
         method=method,
     )
     with urllib.request.urlopen(req, timeout=30) as resp:
-        return json.loads(resp.read())
+        raw = resp.read()
+        return json.loads(raw) if raw else {}
 
 
 def main():
-    if len(sys.argv) < 4:
-        sys.exit("usage: post-comment.py <owner/repo> <pr> <report.md>")
-    repo, pr, report_path = sys.argv[1], sys.argv[2], sys.argv[3]
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    flags = {a for a in sys.argv[1:] if a.startswith("--")}
+    if len(args) < 3:
+        sys.exit("usage: post-comment.py <owner/repo> <pr> <report.md> [marker] [--update-only|--delete]")
+    repo, pr, report_path = args[0], args[1], args[2]
+    marker = args[3] if len(args) > 3 else REPORT_MARKER
+    update_only = "--update-only" in flags
+    delete = "--delete" in flags
     if not re.fullmatch(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+", repo) or not pr.isdigit():
         sys.exit(f"ERROR: ungültige Argumente repo='{repo}' pr='{pr}'")
 
@@ -49,18 +63,29 @@ def main():
         print("ERROR: GITHUB_TOKEN nicht gesetzt", file=sys.stderr)
         sys.exit(2)
 
-    with open(report_path, encoding="utf-8") as f:
-        body = f.read()
-    if MARKER not in body:
-        body = f"{MARKER}\n{body}"
+    body = None
+    if not delete:
+        with open(report_path, encoding="utf-8") as f:
+            body = f.read()
+        if marker not in body:
+            body = f"{marker}\n{body}"
 
     try:
         existing = gh("GET", f"/repos/{repo}/issues/{pr}/comments?per_page=100", token=token)
-        prev = next((c for c in existing if MARKER in (c.get("body") or "")), None)
+        prev = next((c for c in existing if marker in (c.get("body") or "")), None)
+        if delete:
+            if prev:
+                gh("DELETE", f"/repos/{repo}/issues/comments/{prev['id']}", token=token)
+                print(f"DELETED: comment {prev['id']}")
+            else:
+                print("NOOP: kein Kommentar mit Marker")
+            return
         if prev:
             result = gh("PATCH", f"/repos/{repo}/issues/comments/{prev['id']}",
                         {"body": body}, token=token)
             print(f"UPDATED: {result.get('html_url', '?')}")
+        elif update_only:
+            print("NOOP: --update-only, kein bestehender Kommentar")
         else:
             result = gh("POST", f"/repos/{repo}/issues/{pr}/comments",
                         {"body": body}, token=token)

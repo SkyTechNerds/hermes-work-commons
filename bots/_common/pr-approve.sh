@@ -10,7 +10,6 @@
 set -uo pipefail
 [ "$#" -lt 3 ] && { echo "usage: pr-approve.sh <owner/repo> <pr> <approve|dismiss|auto> [body]" >&2; exit 2; }
 REPO="$1"; PR="$2"; MODE="$3"; shift 3; BODY="${*:-}"
-BOT="the-codemole[bot]"
 OWNER="${REPO%%/*}"; NAME="${REPO##*/}"
 
 # Env-Token (App-Installation) hat Vorrang; sonst PAT laden (wie review-comment.sh).
@@ -28,11 +27,32 @@ fi
 # + .codemole.yml lang:). CODEMOLE_LANG aus dem Env hat Vorrang, sonst selbst erkennen.
 CM_LANG="${CODEMOLE_LANG:-$(bash "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/detect-lang.sh" "$REPO" "$PR" 2>/dev/null || echo de)}"
 if [ "$CM_LANG" = "en" ]; then
-  MSG_APPROVE="All checks passed, review clean. — CodeMole"
-  MSG_DISMISS="No longer clean — approval withdrawn."
+  MSG_APPROVE="All checks passed, review clean. — CodeMole
+<!-- codemole:bot -->"
+  MSG_DISMISS="No longer clean — approval withdrawn.
+<!-- codemole:bot -->"
 else
-  MSG_APPROVE="Alle Findings adressiert, Checks sauber. — CodeMole"
-  MSG_DISMISS="Nicht mehr sauber — Approve zurückgezogen."
+  MSG_APPROVE="Alle Findings adressiert, Checks sauber. — CodeMole
+<!-- codemole:bot -->"
+  MSG_DISMISS="Nicht mehr sauber — Approve zurückgezogen.
+<!-- codemole:bot -->"
+fi
+
+# Bot-Identitaet. Mit App-Installation-Token ist der Autor `the-codemole[bot]`;
+# im PAT-Modus (Owner ohne App-Installation, z.B. JUMO) postet ein NORMALER User —
+# dann muessen Idempotenz-, Thread- und Report-Abfragen auf DESSEN Login laufen,
+# sonst zaehlt `auto` 0 offene Threads und approved trotz offener Findings.
+# `gh api user` scheitert mit einem Installation-Token (403) -> Fallback = App-Bot.
+# ACHTUNG: `gh api user` schreibt den 403-Fehlerkoerper als JSON auf STDOUT
+# (nicht stderr) — ungeprueft landete der komplette JSON-Text in BOT und zersaegte
+# spaeter den jq-Filter (Ergebnis -1 = "Thread-Zaehlung kaputt"). Deshalb streng
+# validieren: GitHub-Logins bestehen nur aus [A-Za-z0-9-] (Bots zusaetzlich "[bot]").
+_WHO="$(gh api user -q .login 2>/dev/null || true)"
+if ! printf '%s' "${_WHO:-}" | grep -qE '^[A-Za-z0-9][A-Za-z0-9-]{0,38}$'; then _WHO=""; fi
+if [ -n "${_WHO:-}" ] && [ "$_WHO" != "null" ]; then
+  BOT="$_WHO"; BOT_GQL="$_WHO"
+else
+  BOT="the-codemole[bot]"; BOT_GQL="the-codemole"
 fi
 
 do_approve() {
@@ -40,14 +60,28 @@ do_approve() {
   local n; n="$(gh api "repos/$REPO/pulls/$PR/reviews?per_page=100" \
         --jq "[.[] | select(.user.login==\"$BOT\" and .state==\"APPROVED\" and .commit_id==\"$sha\")] | length" 2>/dev/null || echo 0)"
   if [ "${n:-0}" -gt 0 ]; then echo "APPROVE-SKIP: schon approved fuer $sha"; return 0; fi
-  gh api -X POST "repos/$REPO/pulls/$PR/reviews?per_page=100" \
+  local out rc
+  out="$(gh api -X POST "repos/$REPO/pulls/$PR/reviews?per_page=100" \
     -f event=APPROVE -f commit_id="$sha" -f body="${BODY:-$MSG_APPROVE}" \
-    --jq '"APPROVED: " + (.html_url // "ok")'
+    --jq '"APPROVED: " + (.html_url // "ok")' 2>&1)"; rc=$?
+  # GitHub verbietet das Approven EIGENER PRs. Im PAT-Modus ist der Bot ein
+  # normaler User — ist er zugleich der PR-Autor, ist das kein Fehler, sondern
+  # eine Systemgrenze: klar melden statt als Fehlschlag zu werten.
+  if [ $rc -ne 0 ] && printf '%s' "$out" | grep -qi "own pull request"; then
+    echo "APPROVE-SKIP: $BOT ist selbst PR-Autor — GitHub erlaubt kein Self-Approve"
+    return 0
+  fi
+  printf '%s\n' "$out"
+  return $rc
 }
 
 do_dismiss() {
   local ids; ids="$(gh api "repos/$REPO/pulls/$PR/reviews?per_page=100" \
           --jq ".[] | select(.user.login==\"$BOT\" and .state==\"APPROVED\") | .id" 2>/dev/null || true)"
+  # gh schreibt Fehlerkoerper (404/5xx) als JSON auf STDOUT, nicht stderr. Ungefiltert
+  # landete der Text in der Schleife und erzeugte Muell wie 'dismiss-fail id={"message"...'.
+  # Deshalb nur echte IDs behalten.
+  ids="$(printf '%s\n' "$ids" | grep -E '^[0-9]+$' || true)"
   [ -z "$ids" ] && { echo "DISMISS-NOOP: kein offenes Approve"; return 0; }
   local id
   for id in $ids; do
@@ -63,10 +97,10 @@ case "$MODE" in
   auto)
     # Offene (unaufgeloeste) Bot-Review-Threads zaehlen.
     OPEN="$(gh api graphql -f query="{repository(owner:\"$OWNER\",name:\"$NAME\"){pullRequest(number:$PR){reviewThreads(first:100){nodes{isResolved isOutdated comments(first:1){nodes{author{login}}}}}}}}" \
-      --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved==false and .isOutdated==false and (.comments.nodes[0].author.login=="the-codemole"))] | length' 2>/dev/null || echo -1)"
+      --jq "[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved==false and .isOutdated==false and (.comments.nodes[0].author.login==\"$BOT_GQL\"))] | length" 2>/dev/null || echo -1)"
     # Letzten Report-Kommentar holen.
     REPORT="$(gh api "repos/$REPO/issues/$PR/comments" \
-      --jq '[.[] | select(.user.login=="the-codemole[bot]" and (.body|test("hermes-work:report")))] | last | .body' 2>/dev/null || true)"
+      --jq "[.[] | select(.user.login==\"$BOT\" and (.body|test(\"hermes-work:report\")))] | last | .body" 2>/dev/null || true)"
     # ❌ = fehlgeschlagene Checks.
     FAILS="$(printf '%s' "$REPORT" | grep -c '❌' || true)"
     # ⚠️-Warns von Checks OHNE Inline-Thread (hacs/translations) blocken auch — sonst
