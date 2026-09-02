@@ -55,6 +55,37 @@ else
   BOT="the-codemole[bot]"; BOT_GQL="the-codemole"
 fi
 
+# Abschlusskommentar, wenn ein formales Approve unmoeglich ist (Bot == PR-Autor).
+# Ohne ihn endet ein sauberer PR ohne jedes sichtbare Signal — der Haken fehlt ja.
+# Upsert ueber eigenen Marker, damit bei jedem Lauf derselbe Kommentar aktualisiert
+# statt ein neuer gepostet wird.
+READY_MARK="<!-- hermes-work:ready -->"
+post_ready() {
+  local d note tmp
+  d="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  if [ "$CM_LANG" = "en" ]; then
+    note="**Review complete — ready to merge from the automation's side.**${BULLETS:-}"
+    note="$note"$'\n\n'"<sub>No formal approval possible: the automation runs under the same account as the PR author.</sub>"
+  else
+    note="**Review abgeschlossen — aus Sicht der Automatisierung mergebar.**${BULLETS:-}"
+    note="$note"$'\n\n'"<sub>Kein formales Approve möglich: die Automatisierung läuft unter demselben Account wie der PR-Autor.</sub>"
+  fi
+  tmp="$(mktemp)"; printf '%s\n%s\n' "$note" "<!-- codemole:bot -->" > "$tmp"
+  if python3 "$d/post-comment.py" "$REPO" "$PR" "$tmp" "$READY_MARK" >/dev/null 2>&1; then
+    echo "READY-KOMMENTAR gesetzt"
+  else
+    echo "READY-KOMMENTAR fehlgeschlagen" >&2
+  fi
+  rm -f "$tmp"
+}
+
+# Ist der PR nicht mehr sauber, muss auch der Abschlusskommentar weg — sonst stuende
+# dort weiter "mergebar", obwohl inzwischen ein Finding offen ist.
+drop_ready() {
+  local d; d="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  python3 "$d/post-comment.py" "$REPO" "$PR" /dev/null "$READY_MARK" --delete >/dev/null 2>&1 || true
+}
+
 do_approve() {
   local sha; sha="$(gh api "repos/$REPO/pulls/$PR" --jq .head.sha 2>/dev/null)" || { echo "pr-approve: head-SHA nicht ermittelbar" >&2; return 1; }
   local n; n="$(gh api "repos/$REPO/pulls/$PR/reviews?per_page=100" \
@@ -69,6 +100,7 @@ do_approve() {
   # eine Systemgrenze: klar melden statt als Fehlschlag zu werten.
   if [ $rc -ne 0 ] && printf '%s' "$out" | grep -qi "own pull request"; then
     echo "APPROVE-SKIP: $BOT ist selbst PR-Autor — GitHub erlaubt kein Self-Approve"
+    post_ready   # ohne Haken waere sonst gar kein Abschluss sichtbar
     return 0
   fi
   printf '%s\n' "$out"
@@ -76,6 +108,7 @@ do_approve() {
 }
 
 do_dismiss() {
+  drop_ready
   local ids; ids="$(gh api "repos/$REPO/pulls/$PR/reviews?per_page=100" \
           --jq ".[] | select(.user.login==\"$BOT\" and .state==\"APPROVED\") | .id" 2>/dev/null || true)"
   # gh schreibt Fehlerkoerper (404/5xx) als JSON auf STDOUT, nicht stderr. Ungefiltert
@@ -116,17 +149,21 @@ case "$MODE" in
       # den GitHub unter "approved these changes" anzeigt, also der sichtbare Abschluss.
       OKN="$(printf '%s' "$REPORT" | grep -c '✅' || true)"
       SKN="$(printf '%s' "$REPORT" | grep -c '⚪' || true)"
+      # Bullets separat halten: derselbe Befund wird einmal als Approve-Text und —
+      # wenn GitHub kein Self-Approve zulaesst — als Abschlusskommentar gebraucht.
+      BULLETS=""
       if [ "$CM_LANG" = "en" ]; then
-        SUM="**Approved — review complete.**"
-        [ "${OKN:-0}" -gt 0 ] && SUM="$SUM"$'\n'"- Checks: ${OKN} passed, ${SKN} skipped, 0 failed"
-        [ "${DONE_N:-0}" -gt 0 ] && SUM="$SUM"$'\n'"- ${DONE_N} finding(s) addressed, no open threads"
-        [ "${DONE_N:-0}" -eq 0 ] && SUM="$SUM"$'\n'"- No findings, no open threads"
+        [ "${OKN:-0}" -gt 0 ] && BULLETS="$BULLETS"$'\n'"- Checks: ${OKN} passed, ${SKN} skipped, 0 failed"
+        [ "${DONE_N:-0}" -gt 0 ] && BULLETS="$BULLETS"$'\n'"- ${DONE_N} finding(s) addressed, no open threads"
+        [ "${DONE_N:-0}" -eq 0 ] && BULLETS="$BULLETS"$'\n'"- No findings, no open threads"
+        SUM="**Approved — review complete.**${BULLETS}"
       else
-        SUM="**Freigegeben — Review abgeschlossen.**"
-        [ "${OKN:-0}" -gt 0 ] && SUM="$SUM"$'\n'"- Checks: ${OKN} grün, ${SKN} übersprungen, 0 fehlgeschlagen"
-        [ "${DONE_N:-0}" -gt 0 ] && SUM="$SUM"$'\n'"- ${DONE_N} Finding(s) adressiert, keine offenen Punkte"
-        [ "${DONE_N:-0}" -eq 0 ] && SUM="$SUM"$'\n'"- Keine Findings, keine offenen Punkte"
+        [ "${OKN:-0}" -gt 0 ] && BULLETS="$BULLETS"$'\n'"- Checks: ${OKN} grün, ${SKN} übersprungen, 0 fehlgeschlagen"
+        [ "${DONE_N:-0}" -gt 0 ] && BULLETS="$BULLETS"$'\n'"- ${DONE_N} Finding(s) adressiert, keine offenen Punkte"
+        [ "${DONE_N:-0}" -eq 0 ] && BULLETS="$BULLETS"$'\n'"- Keine Findings, keine offenen Punkte"
+        SUM="**Freigegeben — Review abgeschlossen.**${BULLETS}"
       fi
+      export BULLETS
       BODY="$SUM"$'\n'"<!-- codemole:bot -->"
       do_approve
     else
