@@ -72,6 +72,7 @@ post_ready() {
   fi
   tmp="$(mktemp)"; printf '%s\n%s\n' "$note" "<!-- codemole:bot -->" > "$tmp"
   if python3 "$d/post-comment.py" "$REPO" "$PR" "$tmp" "$READY_MARK" >/dev/null 2>&1; then
+    READY_POSTED=1   # sonst raeumt der Aufrufer den Kommentar gleich wieder weg (s.u.)
     echo "READY-KOMMENTAR gesetzt"
   else
     echo "READY-KOMMENTAR fehlgeschlagen" >&2
@@ -79,8 +80,37 @@ post_ready() {
   rm -f "$tmp"
 }
 
-# Ist der PR nicht mehr sauber, muss auch der Abschlusskommentar weg — sonst stuende
-# dort weiter "mergebar", obwohl inzwischen ein Finding offen ist.
+# Gegenstueck: benennen, WAS den Abschluss blockiert. Vorher stand das nur als
+# ❌-Zeile in der Check-Tabelle — auf einem langen PR faellt das schlicht nicht auf,
+# und es fehlte die Aussage "deshalb ist hier noch nicht Schluss" (JUMO#786).
+# Gleicher Marker wie der Fertig-Kommentar: es gibt IMMER genau einen Status-Kommentar,
+# der zwischen "mergebar" und "noch offen" wechselt statt sich zu stapeln.
+post_blocked() {
+  local d body fails tmp; d="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  # "❌ [**Name**](url) — Text"  ->  "- ❌ Name: Text"
+  fails="$(printf '%s' "$REPORT" | grep '^❌' \
+           | sed -E 's|^❌ \[\*\*([^*]*)\*\*\]\([^)]*\) — |- ❌ \1: |' | head -8)"
+  if [ "$CM_LANG" = "en" ]; then
+    body="**Not done yet — review still open.**"
+    [ -n "$fails" ] && body="$body"$'\n'"$fails"
+    [ "${OPEN:-0}" -gt 0 ] && body="$body"$'\n'"- ${OPEN} open finding(s) in the diff — please fix or reply in the thread"
+    [ "${WARN_BLOCK:-0}" -gt 0 ] && body="$body"$'\n'"- ${WARN_BLOCK} blocking warning(s) in the report"
+    body="$body"$'\n\n'"<sub>Once addressed, a push is enough — or comment \`@codemole recheck\`.</sub>"
+  else
+    body="**Noch nicht abgeschlossen — hier fehlt noch etwas.**"
+    [ -n "$fails" ] && body="$body"$'\n'"$fails"
+    [ "${OPEN:-0}" -gt 0 ] && body="$body"$'\n'"- ${OPEN} offene(s) Finding(s) im Diff — bitte beheben oder im Thread beantworten"
+    [ "${WARN_BLOCK:-0}" -gt 0 ] && body="$body"$'\n'"- ${WARN_BLOCK} blockierende Warnung(en) im Report"
+    body="$body"$'\n\n'"<sub>Nach dem Beheben genügt ein Push — oder als Kommentar \`@codemole recheck\`.</sub>"
+  fi
+  tmp="$(mktemp)"; printf '%s\n%s\n' "$body" "<!-- codemole:bot -->" > "$tmp"
+  python3 "$d/post-comment.py" "$REPO" "$PR" "$tmp" "$READY_MARK" >/dev/null 2>&1 \
+    && echo "STATUS-KOMMENTAR: noch offen" || echo "STATUS-KOMMENTAR fehlgeschlagen" >&2
+  rm -f "$tmp"
+}
+
+# Nach einem echten Approve ist der Haken das Signal — dann muss der Status-Kommentar
+# weg, sonst stuenden zwei Aussagen nebeneinander.
 drop_ready() {
   local d; d="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   python3 "$d/post-comment.py" "$REPO" "$PR" /dev/null "$READY_MARK" --delete >/dev/null 2>&1 || true
@@ -108,7 +138,6 @@ do_approve() {
 }
 
 do_dismiss() {
-  drop_ready
   local ids; ids="$(gh api "repos/$REPO/pulls/$PR/reviews?per_page=100" \
           --jq ".[] | select(.user.login==\"$BOT\" and .state==\"APPROVED\") | .id" 2>/dev/null || true)"
   # gh schreibt Fehlerkoerper (404/5xx) als JSON auf STDOUT, nicht stderr. Ungefiltert
@@ -165,9 +194,13 @@ case "$MODE" in
       fi
       export BULLETS
       BODY="$SUM"$'\n'"<!-- codemole:bot -->"
-      do_approve
+      READY_POSTED=""
+      if do_approve && [ -z "$READY_POSTED" ]; then
+        drop_ready   # echter Haken gesetzt -> Status-Kommentar unnoetig
+      fi
     else
       do_dismiss   # noch offene Punkte -> ggf. stale Approve zuruecknehmen
+      post_blocked # ... und sichtbar sagen, WAS noch fehlt
     fi
     ;;
   *) echo "pr-approve: unbekannter Modus '$MODE'" >&2; exit 2 ;;
