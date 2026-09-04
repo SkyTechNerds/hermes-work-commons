@@ -76,7 +76,9 @@ case "$REPO" in
 
 $AEM_RULES"
     else
-      # Fallback wenn Wiki nicht erreichbar
+      # Fallback wenn Wiki nicht erreichbar — LAUT melden, sonst reviewt der Bot
+      # monatelang gegen eine Kurzliste, ohne dass es jemandem auffaellt.
+      echo "ai-review: WARNUNG — AEM-Regelwerk NICHT geladen (${#AEM_RULES} Zeichen), Review laeuft auf der Kurz-Fallback-Liste" >&2
       CRIT="AEM EDS: fehlendes moveInstrumentation; Framework-Imports (React/Vue/jQuery); Imports ohne .js-Endung; img.src statt responsive Images; outline:none; hardcodierte Farben statt var(--); CSS-Nesting>3; Animationen auf Layout-Properties statt transform/opacity; Touch-Targets<44px."
     fi
     ;;
