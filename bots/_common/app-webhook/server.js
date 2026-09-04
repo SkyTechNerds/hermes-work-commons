@@ -38,6 +38,32 @@ const RUNS_IN_FLIGHT = new Set();
 const PENDING_REEVAL = new Set();
 // Projekte mit bereits eingerichtetem Arbeitsverzeichnis (inkl. node_modules).
 const PROJECT_WORKDIR = { jumo: '/opt/jumo-cms' };
+// Debounce fuer den TEUREN Teil (Logik-Review per LLM). Ein Entwickler-Agent, der
+// im Minutentakt pusht, loeste sonst pro Push einen vollen Opus-Lauf aus — faceid#18:
+// 28 Commits in 80 Minuten, 27 Reviews. Die deterministischen Checks bleiben bei JEDEM
+// Push (billig + schnelles Feedback), nur der LLM-Review wird gebuendelt und nach Ablauf
+// des Fensters EINMAL nachgeholt (trailing debounce, damit der letzte Stand nie ausfaellt).
+const REVIEW_MIN_INTERVAL_MS = parseInt(process.env.CM_REVIEW_MIN_INTERVAL_MS || '600000', 10);
+const LAST_REVIEW = new Map();       // repo#pr -> Zeitpunkt des letzten LLM-Reviews
+const DEFERRED_RUN = new Map();      // repo#pr -> Timer des nachgeholten Laufs
+
+function scheduleDeferredRun(repo, pr, payload, delayMs) {
+  const key = `${repo}#${pr}`;
+  clearTimeout(DEFERRED_RUN.get(key));   // jeder neue Push verschiebt den Nachhol-Lauf
+  DEFERRED_RUN.set(key, setTimeout(async () => {
+    DEFERRED_RUN.delete(key);
+    try {
+      const token = await resolveToken(payload.installation && payload.installation.id, repo);
+      const prData = await ghGetJson(`/repos/${repo}/pulls/${pr}`, token);
+      if (!prData || prData.state !== 'open' || prData.draft || prData.merged) {
+        log(`deferred ${key}: PR nicht mehr offen — nichts nachzuholen`); return;
+      }
+      log(`deferred ${key}: nachgeholter Lauf nach Drosselung`);
+      await handlePullRequest({ ...payload, pull_request: prData, number: pr });
+    } catch (e) { log(`deferred ${key}: fehlgeschlagen: ${e.message}`); }
+  }, Math.max(5000, delayMs)));
+}
+
 const PORT = parseInt(process.env.PORT || '3956', 10);
 const LOG = process.env.HERMES_APP_LOG || '/var/log/hermes-work-app.log';
 const WORKROOT = process.env.HERMES_APP_WORKROOT || '/opt/hermes-app-workdir';
@@ -263,10 +289,24 @@ async function handlePullRequest(payload) {
     [repo, String(pr), branch, base, 'post'], token, project);
   log(`test ${repo}#${pr} exit ${test.code}: ${test.out.slice(-160).replace(/\n/g, ' ')}`);
 
-  const review = await run(path.join(BOTS_DIR, '_common', 'ai-review.sh'),
-    [repo, String(pr)], token, project);
-  const fm = review.out.match(/AI-REVIEW: (\d+)/);
-  log(`ai-review ${repo}#${pr}: ${fm ? fm[1] : '?'} findings (exit ${review.code})`);
+  // Teuren Logik-Review drosseln (s. REVIEW_MIN_INTERVAL_MS). Wird er uebersprungen,
+  // gilt er als "nicht gelaufen" (weder Fehler noch Skip) — die bestehenden Findings
+  // bleiben als Threads stehen, die Approve-Bewertung arbeitet ohnehin auf denen.
+  let review = { code: 0, out: '' };
+  let fm = null;   // wird weiter unten fuer die Findings-Zahl gebraucht -> NICHT im else-Block binden
+  const _rk = `${repo}#${pr}`;
+  const _since = Date.now() - (LAST_REVIEW.get(_rk) || 0);
+  if (_since < REVIEW_MIN_INTERVAL_MS) {
+    const _wait = REVIEW_MIN_INTERVAL_MS - _since;
+    log(`ai-review ${_rk}: gedrosselt (letzter Lauf vor ${Math.round(_since / 1000)}s) — nachgeholt in ${Math.round(_wait / 1000)}s`);
+    scheduleDeferredRun(repo, pr, payload, _wait);
+  } else {
+    LAST_REVIEW.set(_rk, Date.now());
+    review = await run(path.join(BOTS_DIR, '_common', 'ai-review.sh'),
+      [repo, String(pr)], token, project);
+    fm = review.out.match(/AI-REVIEW: (\d+)/);
+    log(`ai-review ${repo}#${pr}: ${fm ? fm[1] : '?'} findings (exit ${review.code})`);
+  }
 
   // page-audit (a11y/Semantik/Timing, Zwei-Pass) — no-op ohne page-audit-Config in .codemole.yml
   const audit = await run(path.join(BOTS_DIR, '_common', 'page-audit', 'audit.sh'),
