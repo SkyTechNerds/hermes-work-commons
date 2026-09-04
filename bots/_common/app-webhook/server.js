@@ -64,6 +64,40 @@ function scheduleDeferredRun(repo, pr, payload, delayMs) {
   }, Math.max(5000, delayMs)));
 }
 
+// Obergrenze fuer automatische Thread-Antworten je PR und Stunde. Gegenstueck zur
+// Review-Drosselung: bei faceid#18 kamen 74 ai-reply-Aufrufe zusammen, weil ein
+// Entwickler-Agent auf jedes Finding antwortete. Gleitendes Fenster, kein starrer Reset.
+const REPLY_MAX_PER_HOUR = parseInt(process.env.CM_REPLY_MAX_PER_HOUR || '20', 10);
+const REPLY_TIMES = new Map();   // repo#pr -> Zeitstempel der letzten Antworten
+const REPLY_LIMITED = new Set(); // repo#pr -> Hinweis steht aktuell auf dem PR
+
+// Gibt frei ODER sagt, wie lange es noch dauert.
+function replyBudget(key) {
+  const now = Date.now(), cutoff = now - 3600000;
+  const times = (REPLY_TIMES.get(key) || []).filter(t => t > cutoff);
+  REPLY_TIMES.set(key, times);
+  if (times.length < REPLY_MAX_PER_HOUR) return { ok: true, times };
+  return { ok: false, retryMs: Math.max(1000, times[0] + 3600000 - now) };
+}
+
+// EIN Hinweis auf dem PR (Upsert), damit klar ist, warum gerade nichts kommt —
+// stilles Verstummen waere schlimmer als die Drosselung selbst.
+async function postRateNotice(repo, pr, token, project, retryMs) {
+  const key = `${repo}#${pr}`;
+  const until = new Date(Date.now() + retryMs).toLocaleTimeString('de-DE',
+    { timeZone: 'Europe/Berlin', hour: '2-digit', minute: '2-digit' });
+  const lang = (await run(path.join(BOTS_DIR, '_common', 'detect-lang.sh'), [repo, String(pr)], token, project))
+    .out.trim().endsWith('en') ? 'en' : 'de';
+  const body = lang === 'en'
+    ? `**Many follow-ups in a short time — replies paused briefly.**\n\nMore than ${REPLY_MAX_PER_HOUR} replies within an hour on this PR. I will answer automatically again from about **${until}**.\n\n<sub>Skipped follow-ups are not answered retroactively — just reply again afterwards, or comment \`@codemole recheck\`.</sub>`
+    : `**Viele Rückfragen in kurzer Zeit — Antworten kurz pausiert.**\n\nAuf diesem PR sind mehr als ${REPLY_MAX_PER_HOUR} Antworten innerhalb einer Stunde zusammengekommen. Ab etwa **${until}** antworte ich automatisch wieder.\n\n<sub>Übersprungene Rückfragen beantworte ich nicht nachträglich — danach einfach nochmal antworten oder \`@codemole recheck\` kommentieren.</sub>`;
+  const tmp = `/tmp/cm-ratelimit-${repo.replace(/\W/g, '_')}-${pr}.md`;
+  fs.writeFileSync(tmp, `${body}\n<!-- codemole:bot -->\n`);
+  await runPy([path.join(BOTS_DIR, '_common', 'post-comment.py'), repo, String(pr), tmp,
+    '<!-- hermes-work:ratelimit -->'], token);
+  REPLY_LIMITED.add(key);
+}
+
 const PORT = parseInt(process.env.PORT || '3956', 10);
 const LOG = process.env.HERMES_APP_LOG || '/var/log/hermes-work-app.log';
 const WORKROOT = process.env.HERMES_APP_WORKROOT || '/opt/hermes-app-workdir';
@@ -394,6 +428,23 @@ async function handleReviewComment(payload) {
   let token;
   try { token = await resolveToken(installationId, repo); }
   catch (e) { log(`reply token-fail ${repo}#${pr}: ${e.message}`); return; }
+
+  const _bk = `${repo}#${pr}`;
+  const _bud = replyBudget(_bk);
+  if (!_bud.ok) {
+    log(`reply ${_bk}: Obergrenze erreicht (${REPLY_MAX_PER_HOUR}/h) — uebersprungen, frei in ${Math.round(_bud.retryMs / 1000)}s`);
+    if (!REPLY_LIMITED.has(_bk)) {
+      try { await postRateNotice(repo, pr, token, projectForRepo(repo), _bud.retryMs); }
+      catch (e) { log(`reply ${_bk}: Hinweis fehlgeschlagen: ${e.message}`); }
+    }
+    return;
+  }
+  _bud.times.push(Date.now());
+  // Nach der Pause: den Hinweis wieder entfernen, sonst steht dort dauerhaft "pausiert".
+  if (REPLY_LIMITED.delete(_bk)) {
+    await runPy([path.join(BOTS_DIR, '_common', 'post-comment.py'), repo, String(pr),
+      '/dev/null', '<!-- hermes-work:ratelimit -->', '--delete'], token).catch(() => {});
+  }
 
   log(`reply ${repo}#${pr} on comment ${c.id} (-> ${c.in_reply_to_id})`);
   const out = await run(path.join(BOTS_DIR, '_common', 'ai-reply.sh'),
