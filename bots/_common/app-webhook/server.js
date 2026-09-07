@@ -328,10 +328,12 @@ async function handlePullRequest(payload) {
   // bleiben als Threads stehen, die Approve-Bewertung arbeitet ohnehin auf denen.
   let review = { code: 0, out: '' };
   let fm = null;   // wird weiter unten fuer die Findings-Zahl gebraucht -> NICHT im else-Block binden
+  let reviewThrottled = false, reviewWaitMs = 0;
   const _rk = `${repo}#${pr}`;
   const _since = Date.now() - (LAST_REVIEW.get(_rk) || 0);
   if (_since < REVIEW_MIN_INTERVAL_MS) {
     const _wait = REVIEW_MIN_INTERVAL_MS - _since;
+    reviewThrottled = true; reviewWaitMs = _wait;
     log(`ai-review ${_rk}: gedrosselt (letzter Lauf vor ${Math.round(_since / 1000)}s) — nachgeholt in ${Math.round(_wait / 1000)}s`);
     scheduleDeferredRun(repo, pr, payload, _wait);
   } else {
@@ -362,6 +364,11 @@ async function handlePullRequest(payload) {
     const em = review.out.match(/AI-REVIEW-ERROR:\s*([^\n]+)/);
     const reason = em ? em[1].slice(0, 90) : `Fehler (exit ${review.code})`;
     reviewLine = `🔍 Review: ⚠️ FEHLGESCHLAGEN — ${reason}`;
+  } else if (reviewThrottled) {
+    // NICHT als "sauber" ausweisen: der Review hat gar nicht stattgefunden. Genau diese
+    // Verwechslung liess einen PR erst "keine Findings" melden und kurz darauf Findings
+    // nachliefern.
+    reviewLine = `🔍 Review: ⏳ steht noch aus (gebündelt, läuft in ${Math.round(reviewWaitMs / 1000)}s)`;
   } else if (reviewSkip) {
     reviewLine = `🔍 Review: ⏭️ übersprungen (kein Diff)`;
   } else {
@@ -374,7 +381,11 @@ async function handlePullRequest(payload) {
   // erfasst auch Check-Inline-Findings (⚠️ warn), nicht nur ai-review (PR #397).
   // Ergebnis MITLOGGEN: der Push-Pfad entschied bisher stumm ueber Approve/Dismiss —
   // bei "Checks liefen, aber kein Approve" stand im Log nicht, warum (faceid#16).
-  {
+  if (reviewThrottled) {
+    // Ein ausstehender Review darf NICHT als "alles sauber" durchgehen — die Bewertung
+    // macht der nachgeholte Lauf, wenn das Ergebnis wirklich vorliegt.
+    log(`approve ${repo}#${pr}: uebersprungen — Review steht noch aus`);
+  } else {
     const _mode = (runnerFail || reviewErr) ? 'dismiss' : 'auto';
     const _ap = await run(path.join(BOTS_DIR, '_common', 'pr-approve.sh'), [repo, String(pr), _mode], token, project);
     log(`approve ${repo}#${pr} (${_mode}): ${(_ap.out || '').trim().replace(/\n/g, ' | ').slice(-200)} [exit ${_ap.code}]`);

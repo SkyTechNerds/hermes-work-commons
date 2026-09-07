@@ -157,6 +157,14 @@ case "$MODE" in
   approve) do_approve ;;
   dismiss) do_dismiss ;;
   auto)
+    # Laeuft gerade ein Logik-Review (egal ueber welchen Pfad)? Dann NICHT entscheiden —
+    # sonst steht "mergebar" da, waehrend die Findings noch unterwegs sind. Der naechste
+    # Ausloeser (Handler-Lauf bzw. pat-poll alle 3 min) bewertet neu.
+    RUN_MARK="/tmp/cm-review-running-$(printf '%s' "$REPO" | tr '/' '_')-$PR"
+    if [ -f "$RUN_MARK" ] && [ "$(( $(date +%s) - $(stat -c %Y "$RUN_MARK" 2>/dev/null || echo 0) ))" -lt 900 ]; then
+      echo "AUTO $REPO#$PR: Logik-Review laeuft noch — Entscheidung verschoben"
+      exit 0
+    fi
     # Review-Threads EINMAL holen und daraus offene UND erledigte zaehlen — die
     # erledigten braucht die Abschlussmeldung ("N Findings adressiert").
     GQL="$(gh api graphql -f query="{repository(owner:\"$OWNER\",name:\"$NAME\"){pullRequest(number:$PR){reviewThreads(first:100){nodes{isResolved isOutdated comments(first:1){nodes{author{login}}}}}}}}" 2>/dev/null || echo '{}')"

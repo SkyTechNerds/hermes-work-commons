@@ -11,6 +11,14 @@ export DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Der Diff ist ANGREIFER-KONTROLLIERTER Input im Prompt. claude läuft deshalb ohne
 # Tools — sonst könnte ein präparierter Diff den Reviewer Dateien von der Box lesen
 # und den Inhalt in gepostete Kommentare exfiltrieren lassen (Secrets!).
+# In-Flight-Marker: BEIDE Wege (App-Handler und alter Discord-Listener) rufen dieses
+# Script auf, wissen aber nichts voneinander. Ohne Marker entschied pr-approve waehrend
+# eines laufenden Reviews "0 offene Findings -> mergebar" — und Sekunden spaeter kamen
+# die Findings (JUMO#794: "mergebar" um 07:48:16, 5 Findings um 07:48:27).
+RUN_MARK="/tmp/cm-review-running-$(printf '%s' "${1:-}" | tr '/' '_')-${2:-}"
+: > "$RUN_MARK" 2>/dev/null || true
+trap 'rm -f "$RUN_MARK"' EXIT
+
 CLAUDE_TOOL_LOCKDOWN=(--disallowedTools "Bash,Read,Write,Edit,NotebookEdit,Glob,Grep,WebFetch,WebSearch,Task,Agent,TodoWrite,KillShell,BashOutput")
 
 # Profil-Optionen aus .codemole.yml (ignore-Globs / ai-review.focus / ai-review.severity)
