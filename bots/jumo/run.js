@@ -338,7 +338,12 @@ function checkCssLint(files) {
   if (!targets.length) return { name: 'CSS Lint', ok: true, detail: 'Keine geänderten CSS-Dateien' };
   // Stylelint schreibt den JSON-Report je nach Exit-Code auf stdout ODER stderr
   // (bei exit 0 landet er auf stderr, stdout ist leer) -> spawnSync liest beides.
-  const proc = spawnSync('npx', ['--no-install', 'stylelint', ...targets, '-f', 'json'],
+  // --allow-empty-input: sind ALLE uebergebenen Dateien von .stylelintignore erfasst,
+  // wirft stylelint sonst AllFilesIgnoredError und der Check kippt komplett auf ROT.
+  // Das ist kein Fehler, sondern ein legitimes Ergebnis (Build-Output, Vendor) — und im
+  // JUMO-Repo enthaelt die .stylelintignore auf dev/main sogar `**/*.css`, wodurch JEDER
+  // PR mit CSS-Aenderung rot wurde. Mit dem Schalter liefert stylelint [] statt zu werfen.
+  const proc = spawnSync('npx', ['--no-install', 'stylelint', ...targets, '--allow-empty-input', '-f', 'json'],
     { cwd: REPO_DIR, encoding: 'utf8', timeout: 180000, maxBuffer: 20 * 1024 * 1024 });
   const out = (proc.stdout && proc.stdout.trim()) ? proc.stdout : (proc.stderr || '');
   const execErr = proc.error || (![0, 2].includes(proc.status) ? new Error(`stylelint exit ${proc.status}`) : null);
@@ -351,16 +356,24 @@ function checkCssLint(files) {
     return { name: 'CSS Lint', ok: false, detail: `Stylelint-Output nicht parsebar: ${String(out).slice(0, 300)}` };
   }
   const problems = [];
+  let linted = 0;
   for (const r of results) {
     if (r.ignored) continue;
+    linted += 1;
     for (const w of r.warnings || []) {
       const rel = path.relative(REPO_DIR, r.source);
       problems.push(`In ${rel} Zeile ${w.line}: ${w.text} (${w.rule})`);
     }
   }
+  // Nichts geprueft ist NICHT "0 Fehler" — sonst steht da ein gruener Haken fuer einen
+  // Check, der gar nicht stattgefunden hat. Deshalb als Skip mit klarer Begruendung.
+  if (!linted) {
+    return { name: 'CSS Lint', ok: true, skipped: true,
+      detail: `keine prüfbaren CSS-Dateien — alle ${targets.length} geänderte(n) Datei(en) sind von .stylelintignore erfasst` };
+  }
   return problems.length
     ? { name: 'CSS Lint', ok: false, detail: capProblems(problems) }
-    : { name: 'CSS Lint', ok: true, detail: `0 Fehler (${targets.length} Datei(en))` };
+    : { name: 'CSS Lint', ok: true, detail: `0 Fehler (${linted} von ${targets.length} Datei(en) geprüft)` };
 }
 
 /** 5 — Placeholder-Keys: literal-Key-Zugriffe gegen AEM-Placeholder-JSON. */
