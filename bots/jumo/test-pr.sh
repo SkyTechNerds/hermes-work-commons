@@ -12,6 +12,8 @@ fi
 # shellcheck source=../_common/load-token.sh
 source "$SCRIPT_DIR/../_common/load-token.sh"
 
+# Explizit statt auf einen Default in run.js zu vertrauen (der ist entfallen).
+export REPO="${REPO:-JUMO-GmbH-Co-KG/JUMO-Website-CMS}"
 export REPO_DIR="${REPO_DIR:-/opt/jumo-cms}"
 
 # Denselben Workdir nutzt inzwischen auch der App-Handler (PAT-Modus) ueber

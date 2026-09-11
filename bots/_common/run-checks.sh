@@ -118,13 +118,17 @@ fi
 
 # aem-eds (z.B. JUMO) hat einen eigenen Node-Runner run.js (9 Checks, zu komplex für Bash-Module).
 # Delegieren: run.js löst Profil/Header selbst auf, fährt die Checks und postet (mode=post).
-# Env (REPO/REPO_DIR/GH_TOKEN/GITHUB_TOKEN) ist gesetzt -> postet im App-Pfad als thecodemole[bot].
 # (Das flock-fd 9 bleibt über exec erhalten -> der Lock gilt auch für run.js.)
 if [ "$PROFILE" = "aem-eds" ]; then
   if [ ! -f "$COMMON/../jumo/run.js" ]; then
     echo "run-checks: Profil aem-eds, aber jumo/run.js fehlt — keine Checks gelaufen!" >&2
     exit 1
   fi
+  # REPO MUSS hier exportiert werden: der gemeinsame Export weiter unten kommt NACH
+  # diesem exec und wurde nie erreicht. run.js fiel deshalb auf seinen alten Default
+  # (das JUMO-Repo) zurueck — bei JUMO unsichtbar, weil der Default zufaellig stimmte,
+  # auf antegma/beatthebuzzer-2026-aem#3 sofort "GitHub API /repos/JUMO-.../pulls/3 -> 404".
+  export REPO PR BASE
   [ "$MODE" = "dry" ] && export DRY_RUN=1
   exec node "$COMMON/../jumo/run.js" "$BRANCH" "$PR" "$BASE" collect
 fi

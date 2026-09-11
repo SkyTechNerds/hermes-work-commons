@@ -33,7 +33,14 @@ const path = require('node:path');
 // Konstanten
 // ---------------------------------------------------------------------------
 
-const REPO = process.env.REPO || 'JUMO-GmbH-Co-KG/JUMO-Website-CMS';
+// KEIN Default mehr: der alte Fallback auf das JUMO-Repo hat einen fehlenden Export
+// jahrelang verdeckt (bei JUMO stimmte er zufaellig) und schlug auf dem ersten fremden
+// AEM-Repo als 404 durch. Lieber laut abbrechen als gegen das falsche Repo pruefen.
+const REPO = process.env.REPO;
+if (!REPO || !/^[^/]+\/[^/]+$/.test(REPO)) {
+  console.error('run.js: REPO nicht gesetzt (erwartet "owner/repo") — Aufrufer muss es exportieren.');
+  process.exit(2);
+}
 const REPO_DIR = process.env.REPO_DIR || process.cwd();
 const DRY_RUN = process.env.DRY_RUN === '1' || process.env.DRY_RUN === 'true';
 

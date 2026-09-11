@@ -98,6 +98,7 @@ post_blocked() {
     body="$body"$'\n\n'"<sub>Once addressed, a push is enough — or comment \`@codemole recheck\`.</sub>"
   else
     body="**Noch nicht abgeschlossen — hier fehlt noch etwas.**"
+    printf '%s' "$REPORT" | grep -q 'hermes-work:report' || body="$body"$'\n'"- Die automatischen Checks sind noch nicht durchgelaufen"
     [ -n "$fails" ] && body="$body"$'\n'"$fails"
     [ "${OPEN:-0}" -gt 0 ] && body="$body"$'\n'"- ${OPEN} offene(s) Finding(s) im Diff — bitte beheben oder im Thread beantworten"
     [ "${WARN_BLOCK:-0}" -gt 0 ] && body="$body"$'\n'"- ${WARN_BLOCK} blockierende Warnung(en) im Report"
@@ -180,6 +181,21 @@ case "$MODE" in
     # informativ (grosser Diff) -> blockt NICHT; inline-Warns (entity-exists etc.)
     # laufen ueber die Thread-Zaehlung, damit Resolve-to-approve erhalten bleibt.
     WARN_BLOCK="$(printf '%s' "$REPORT" | grep '⚠️' | grep -cE '\*\*(hacs|translations)\*\*' || true)"
+    # OHNE Report darf NIE approved werden. `grep -c ❌` auf einem leeren Report ergibt 0 —
+    # "keine fehlgeschlagenen Checks" sah damit genauso aus wie "die Checks liefen nie".
+    # Genau so entstand auf antegma#3 ein Approve, waehrend jeder Lauf am Runner-Fehler
+    # scheiterte (404) und ueberhaupt kein Report auf dem PR stand.
+    # POSITIV pruefen statt Fehlerformen aufzuzaehlen: ein echter Report traegt immer
+    # den Marker. Die Negativ-Liste waere naemlich unvollstaendig gewesen — leer, der
+    # jq-String "null" UND (weil gh Fehlerkoerper auf STDOUT schreibt) ein 404-JSON
+    # sehen alle unterschiedlich aus, muessen aber gleich behandelt werden.
+    no_report() { ! printf '%s' "$REPORT" | grep -q 'hermes-work:report'; }
+    if no_report; then
+      echo "AUTO $REPO#$PR: kein Report vorhanden — Checks noch nicht gelaufen, kein Approve"
+      do_dismiss
+      post_blocked
+      exit 0
+    fi
     echo "AUTO $REPO#$PR: offene Bot-Threads=$OPEN, ❌-Checks=$FAILS, Warn-Block=$WARN_BLOCK"
     if [ "${OPEN:--1}" = "0" ] && [ "${FAILS:-1}" -eq 0 ] && [ "${WARN_BLOCK:-1}" -eq 0 ]; then
       # Abschlussmeldung mit konkreten Zahlen statt nur "sauber" — sie ist der Text,
