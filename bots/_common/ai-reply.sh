@@ -43,16 +43,23 @@ PLOGIN="$(printf '%s' "$PARENT_JSON" | python3 -c 'import sys,json;print(json.lo
 # verlangt — das gilt nur im App-Modus. Im PAT-Modus (Owner ohne App-Installation,
 # z.B. JUMO) postet ein NORMALER User, sonst haette ai-reply dort nie geantwortet.
 # Massgeblich ist deshalb der LOGIN (BOT_LOGINS), nicht der Account-Typ.
-case ",$BOT_LOGINS," in
-  *",$PLOGIN,"*) : ;;
-  *) echo "ai-reply: Parent nicht von uns ($PLOGIN, type=${PTYPE:-?}) — ignoriert"; exit 0 ;;
-esac
-# Der Login allein genuegt im PAT-Modus NICHT: dort schreibt der Mensch unter
-# derselben Identitaet. Ein echtes Bot-Finding ist es nur, wenn der Parent entweder
-# ein Bot-Account ist (App-Modus) oder unseren unsichtbaren Marker traegt.
 PBODY="$(printf '%s' "$PARENT_JSON" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("body") or "")')"
-if [ "$PTYPE" != "Bot" ] && ! printf '%s' "$PBODY" | grep -qE '<!-- *(codemole:bot|cm-inline:)'; then
-  echo "ai-reply: Parent ist ein menschlicher Kommentar (kein Bot-Marker) — ignoriert"; exit 0
+# Marker schlaegt Account. Der Marker ist das Herkunfts-Signal, nicht der Login —
+# und der Login WECHSELT: wandert ein Repo vom PAT-Modus in den App-Modus, stammen die
+# aelteren Findings von der PAT-Identitaet, die neuen von the-codemole[bot]. Eine reine
+# Login-Pruefung erklaerte die alten damit zu "nicht von uns": der Bot beantwortete die
+# Rueckfragen dazu nicht mehr und loeste die Threads nie auf — sie blockierten den
+# Approve dauerhaft (antegma#3 nach der App-Installation).
+if printf '%s' "$PBODY" | grep -qE '<!-- *(codemole:bot|cm-inline:|cm-ai:)'; then
+  :   # eindeutig von uns, unabhaengig davon, unter welchem Account es gepostet wurde
+else
+  # Ohne Marker (Alt-Findings) bleibt nur der Account — dann aber streng: bekannter
+  # Login UND echter Bot-Typ, sonst waere jeder menschliche Inline-Kommentar "unser".
+  case ",$BOT_LOGINS," in
+    *",$PLOGIN,"*)
+      [ "$PTYPE" = "Bot" ] || { echo "ai-reply: Parent ohne Marker und kein Bot-Account ($PLOGIN) — ignoriert"; exit 0; } ;;
+    *) echo "ai-reply: Parent nicht von uns ($PLOGIN, type=${PTYPE:-?}) — ignoriert"; exit 0 ;;
+  esac
 fi
 
 RESP="$(REPLY_JSON="$REPLY_JSON" PARENT_JSON="$PARENT_JSON" python3 <<'PY' | claude -p "${CLAUDE_TOOL_LOCKDOWN[@]}" 2>/dev/null
