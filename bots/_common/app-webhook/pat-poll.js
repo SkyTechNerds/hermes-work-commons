@@ -96,6 +96,36 @@ function inject(event, payload, deliveryId) {
 // Kommentare des Menschen verwerfen (er koennte den Bot nie ansprechen).
 const BOT_MARK_RE = /<!--\s*(codemole:bot|hermes-work:(report|ai-status)|cm-inline:)/i;
 
+// Ist fuer dieses Repo eine App-Installation vorhanden, liefert GitHub echte Webhooks
+// — dann darf der Poller NICHT zusaetzlich einspeisen. Sonst wird derselbe Kommentar
+// zweimal verarbeitet (zwei Antworten im selben Thread), und die Laeufe posten unter
+// zwei Identitaeten: Webhook als the-codemole[bot], Poller als PAT-Inhaber.
+// Das Sicherheitsnetz geht nicht verloren — fuer App-Repos macht catchup.js die
+// Nachzustellung. Die Pruefung ist bewusst dynamisch: so wandert ein Repo beim
+// Aktivieren der App von selbst auf den App-Pfad, ohne dass jemand Konfig anfassen muss.
+function appJwt() {
+  try {
+    const appId = fs.readFileSync(path.join(CONF_DIR, 'app-id'), 'utf8').trim();
+    const key = fs.readFileSync(path.join(CONF_DIR, 'private-key.pem'), 'utf8');
+    const now = Math.floor(Date.now() / 1000);
+    const b64 = o => Buffer.from(JSON.stringify(o)).toString('base64url');
+    const p = b64({ alg: 'RS256', typ: 'JWT' }) + '.' + b64({ iat: now - 60, exp: now + 540, iss: appId });
+    return p + '.' + crypto.sign('RSA-SHA256', Buffer.from(p), key).toString('base64url');
+  } catch { return null; }
+}
+
+function hasAppInstallation(repo, jwt) {
+  if (!jwt) return Promise.resolve(false);
+  return new Promise(res => {
+    const rq = https.request({ host: 'api.github.com', path: `/repos/${repo}/installation`, method: 'GET',
+      headers: { 'User-Agent': 'hermes-pat-poll', Accept: 'application/vnd.github+json',
+        Authorization: 'Bearer ' + jwt } },
+      x => { x.on('data', () => {}); x.on('end', () => res(x.statusCode === 200)); });
+    rq.on('error', () => res(false));   // im Zweifel weiter pollen, nie stillschweigend aussetzen
+    rq.end();
+  });
+}
+
 const numFromUrl = u => { const m = /\/(\d+)$/.exec(u || ''); return m ? parseInt(m[1], 10) : null; };
 
 (async () => {
@@ -111,7 +141,12 @@ const numFromUrl = u => { const m = /\/(\d+)$/.exec(u || ''); return m ? parseIn
     const repos = repoMap[owner] || [];
     if (!repos.length) { log(`${owner}: keine Repos in pat-repos.json`); continue; }
 
+    const jwt = appJwt();
     for (const repo of repos) {
+      if (await hasAppInstallation(repo, jwt)) {
+        log(`${repo}: App-Installation vorhanden — Webhooks/catchup zustaendig, Poller haelt sich raus`);
+        continue;
+      }
       const st = state.repos[repo] || (state.repos[repo] = { since: null, seen: [] });
       const seen = new Set(st.seen || []);
       const nowIso = new Date().toISOString();
