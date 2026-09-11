@@ -167,6 +167,26 @@ function lineCountAtRef(ref, file) {
   return c === '' ? 0 : c.split('\n').length;
 }
 
+/** Repo-Konventionen (PR-Pflichtangaben, Placeholder-Locale).
+ *
+ * Zwei der neun Checks pruefen KONVENTIONEN, keine Technik: die PR-Pflichtangaben
+ * (Ticket-Muster, Abschnitte, Anzahl URLs) und der Placeholder-Abgleich (Locale-Pfad).
+ * Beides war auf JUMO hartkodiert (`WCMS-\d+`, `/de/de/placeholders/`) — auf jedem
+ * anderen AEM-Repo haette der PR-Check deshalb dauerhaft ROT gemeldet, obwohl dort
+ * schlicht andere Regeln gelten. Jetzt kommen die Regeln aus
+ * <CONF>/pr-rules.json (Schluessel: "owner/repo" oder "owner"); ist nichts hinterlegt,
+ * ueberspringt sich der jeweilige Check statt falsch zu urteilen.
+ */
+function loadConventions() {
+  const conf = process.env.HERMES_APP_CONF || '/etc/hermes-work-app';
+  try {
+    const m = JSON.parse(fs.readFileSync(path.join(conf, 'pr-rules.json'), 'utf8'));
+    return m[REPO] || m[REPO.split('/')[0]] || null;
+  } catch {
+    return null;
+  }
+}
+
 /** Lädt testing-rules.json-Ausnahmen aus dem Repo. */
 function loadExceptions() {
   try {
@@ -272,20 +292,39 @@ function checkFileGuard(files, prLabels) {
 }
 
 /** 2 — PR-Vollständigkeit: WCMS-Ticket, Problem/Fix, Before/After-URL. */
-function checkPrCompleteness(pr) {
+function checkPrCompleteness(pr, conv) {
+  if (!conv) {
+    return { name: 'PR-Vollständigkeit', ok: true, skipped: true,
+      detail: 'keine PR-Konventionen für dieses Repo hinterlegt' };
+  }
   const title = pr.title || '';
   const body = pr.body || '';
   const missing = [];
   // Ticket darf im Titel ODER im Body stehen (JUMO-Template setzt "JIRA: WCMS-…" in den Body).
-  if (!/WCMS-\d+/i.test(title) && !/WCMS-\d+/i.test(body)) missing.push('WCMS-Ticket');
-  // Problem/Fix als Markdown-Heading (## …) oder fett (**Problem:** / **Fix:**).
-  if (!/(?:#+\s*|\*\*\s*)Problem/i.test(body)) missing.push('Problem-Abschnitt');
-  if (!/(?:#+\s*|\*\*\s*)Fix/i.test(body)) missing.push('Fix-Abschnitt');
+  if (conv.ticket) {
+    const re = new RegExp(conv.ticket, 'i');
+    if (!re.test(title) && !re.test(body)) missing.push(conv.ticketLabel || 'Ticket');
+  }
+  // Abschnitte als Markdown-Heading (## …) oder fett (**Problem:** / **Fix:**).
+  for (const sec of conv.sections || []) {
+    if (!new RegExp(`(?:#+\\s*|\\*\\*\\s*)${sec}`, 'i').test(body)) missing.push(`${sec}-Abschnitt`);
+  }
   const urls = body.match(/https?:\/\/\S+/g) || [];
-  if (urls.length < 2) missing.push('Before- und After-URL');
+  if (conv.minUrls && urls.length < conv.minUrls) missing.push(conv.urlLabel || `${conv.minUrls} URLs`);
   return missing.length
     ? { name: 'PR-Vollständigkeit', ok: false, detail: `Fehlt: ${missing.join(', ')}` }
     : { name: 'PR-Vollständigkeit', ok: true, detail: 'Ticket, URLs, Problem, Fix vorhanden' };
+}
+
+/** Fehlt das Lint-Werkzeug im Checkout (node_modules nicht installiert)?
+ *
+ * `npx --no-install` meldet dann "canceled due to missing packages". Das ist KEIN
+ * Lint-Fehler, sondern ein nicht eingerichteter Runner — als ❌ zu melden waere
+ * schlicht falsch und bei jedem neu angebundenen Repo Dauer-Rot. Stattdessen ein
+ * Skip MIT Begruendung, damit sichtbar bleibt, dass hier nichts geprueft wurde.
+ */
+function missingToolchain(msg) {
+  return /missing packages|could not determine executable|command not found|ENOENT/i.test(String(msg || ''));
 }
 
 /** 3 — JS Lint: ESLint auf geänderte JS/MJS/JSON-Dateien. */
@@ -306,7 +345,12 @@ function checkJsLint(files) {
   // "ESLint lief mit Findings" (exit 1 + JSON) sauber von "ESLint konnte nicht
   // laufen" (kein/kaputter Output) trennen — Letzteres darf NICHT grün werden.
   if (!out || !String(out).trim()) {
-    return { name: 'JS Lint', ok: false, detail: `ESLint konnte nicht ausgeführt werden: ${String(execErr && execErr.message || 'kein Output').slice(0, 300)}` };
+    const m = String((execErr && (execErr.stderr || execErr.message)) || 'kein Output');
+    if (missingToolchain(m)) {
+      return { name: 'JS Lint', ok: true, skipped: true,
+        detail: 'ESLint im Runner nicht installiert (node_modules fehlen) — nicht geprüft' };
+    }
+    return { name: 'JS Lint', ok: false, detail: `ESLint konnte nicht ausgeführt werden: ${m.slice(0, 300)}` };
   }
   let results;
   try { results = JSON.parse(out); } catch {
@@ -349,7 +393,12 @@ function checkCssLint(files) {
   const execErr = proc.error || (![0, 2].includes(proc.status) ? new Error(`stylelint exit ${proc.status}`) : null);
   if (!out || !String(out).trim()) {
     if (!execErr) return { name: 'CSS Lint', ok: true, detail: `0 Fehler (${targets.length} Datei(en))` };
-    return { name: 'CSS Lint', ok: false, detail: `Stylelint konnte nicht ausgeführt werden: ${String(execErr && execErr.message || 'kein Output').slice(0, 300)}` };
+    const m = String((execErr && execErr.message) || proc.stderr || 'kein Output');
+    if (missingToolchain(m)) {
+      return { name: 'CSS Lint', ok: true, skipped: true,
+        detail: 'Stylelint im Runner nicht installiert (node_modules fehlen) — nicht geprüft' };
+    }
+    return { name: 'CSS Lint', ok: false, detail: `Stylelint konnte nicht ausgeführt werden: ${m.slice(0, 300)}` };
   }
   let results;
   try { results = JSON.parse(out); } catch {
@@ -377,7 +426,11 @@ function checkCssLint(files) {
 }
 
 /** 5 — Placeholder-Keys: literal-Key-Zugriffe gegen AEM-Placeholder-JSON. */
-async function checkPlaceholderKeys(files, pr, exceptions) {
+async function checkPlaceholderKeys(files, pr, exceptions, conv) {
+  if (!conv || !conv.placeholderLocale) {
+    return { name: 'Placeholder-Keys', ok: true, skipped: true,
+      detail: 'keine Placeholder-Konvention für dieses Repo hinterlegt' };
+  }
   if (hasProjectException(exceptions, 'placeholder-keys')) {
     return { name: 'Placeholder-Keys', ok: true, skipped: true, detail: 'projektweite Ausnahme in testing-rules.json' };
   }
@@ -399,7 +452,7 @@ async function checkPlaceholderKeys(files, pr, exceptions) {
   const known = new Set();
   for (const pf of PLACEHOLDER_FILES) {
     try {
-      const res = await fetch(`${base}/de/de/placeholders/${pf}`, { signal: AbortSignal.timeout(10000) });
+      const res = await fetch(`${base}/${conv.placeholderLocale}/placeholders/${pf}`, { signal: AbortSignal.timeout(10000) });
       if (res.ok) {
         const json = await res.json();
         const rows = json.data || json;
@@ -770,6 +823,7 @@ async function main() {
   const pr = await resolveBaseBranch(PR_NUMBER);
   ensureRefs();
   const exceptions = loadExceptions();
+  const conventions = loadConventions();
   const cm = resolveProfile();
   CM_DISABLED = cm.disabled || [];
   CM_IGNORE = cm.ignore || [];
@@ -789,10 +843,10 @@ async function main() {
 
   const results = [
     checkFileGuard(files, prLabels),
-    checkPrCompleteness(pr),
+    checkPrCompleteness(pr, conventions),
     checkJsLint(files),
     checkCssLint(files),
-    await checkPlaceholderKeys(files, pr, exceptions),
+    await checkPlaceholderKeys(files, pr, exceptions, conventions),
     checkUnitTests(files),
     checkVisualTests(files),
     checkMergeFreshness(),
