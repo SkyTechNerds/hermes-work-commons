@@ -75,8 +75,16 @@ print("".join(keep)[:BUDGET + 200], end="")
 ')"
 [ -z "$DIFF" ] && { echo "ai-review: alle geänderten Dateien per ignore ausgenommen"; exit 0; }
 
-case "$REPO" in
-  JUMO-GmbH-Co-KG/*)
+# AEM-Marker im Checkout statt Repo-Name: das Regelwerk gilt fuer JEDES AEM-EDS-
+# Projekt (JUMO, antegma, ...), nicht nur fuer das eine Repo. Ohne das bekam ein
+# neues AEM-Repo nur "Allgemeine Korrektheit" — also gerade NICHT die Projekt-
+# Standards, die den Review wertvoll machen.
+IS_AEM=""
+if [ -d "${REPO_DIR:-.}/blocks" ] && { [ -f "${REPO_DIR:-.}/fstab.yaml" ] || [ -f "${REPO_DIR:-.}/component-definition.json" ]; }; then
+  IS_AEM=1
+fi
+case "${IS_AEM:+aem}${IS_AEM:-$REPO}" in
+  aem|JUMO-GmbH-Co-KG/*)
     # AEM-Regelwerk live aus dem Team-Wiki (Axiom-SMB) holen — Claude reviewt gegen die echten Projekt-Standards.
     AEM_RULES="$("$DIR/wiki-get.sh" concepts/role-aem-frontend.md; printf '\n\n'; "$DIR/wiki-get.sh" concepts/aem-blocks.md; printf '\n\n'; "$DIR/wiki-get.sh" concepts/aem-block-validator.md)"
     if [ "${#AEM_RULES}" -gt 500 ]; then

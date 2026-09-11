@@ -25,7 +25,7 @@ const { spawn } = require('node:child_process');
 
 const CONF_DIR = process.env.HERMES_APP_CONF || '/etc/hermes-work-app';
 const BOTS_DIR = process.env.HERMES_BOTS_DIR || '/opt/hermes-work-commons/bots';
-const ALLOWED_OWNERS = ['SkyTechNerds', 'JUMO-GmbH-Co-KG', 'schimanski-antegma'];  // bei public: nur diese Orgs bedienen
+const ALLOWED_OWNERS = ['SkyTechNerds', 'JUMO-GmbH-Co-KG', 'schimanski-antegma', 'antegma'];  // bei public: nur diese Orgs bedienen
 
 // Laufende Pipeline-Laeufe je repo#pr. Der auto-Approve (Reply-/Mention-Pfad)
 // darf NICHT entscheiden, waehrend ein Lauf noch laeuft: die Findings dieses

@@ -80,8 +80,35 @@ def load_config(repo_dir):
     return None, None
 
 
+def server_default_profile(repo):
+    """Serverseitige Profil-Vorgabe je Owner oder Owner/Repo.
+
+    <CONF>/profile-defaults.json = {"antegma": "generic", "own/repo": "python-app"}
+
+    Noetig, weil detect() rein marker-basiert ist: JEDES Repo mit blocks/ +
+    package.json gilt als "aem-eds" — und dieses Profil delegiert den GANZEN Lauf
+    an bots/jumo/run.js, der auf JUMO zugeschnitten ist (PR-Vollstaendigkeit
+    erwartet ein WCMS-Ticket, Placeholder-Keys ruft /de/de/...). Auf einem anderen
+    AEM-Repo waere das Dauer-Rot. Rangfolge: .codemole.yml im Repo > diese Vorgabe
+    > detect(), damit ein Repo sich weiterhin selbst konfigurieren kann.
+    """
+    if not repo:
+        return None
+    conf = os.environ.get("HERMES_APP_CONF", "/etc/hermes-work-app")
+    try:
+        with open(os.path.join(conf, "profile-defaults.json"), encoding="utf-8") as fh:
+            m = json.load(fh)
+    except Exception:
+        return None
+    v = m.get(repo) or m.get(repo.split("/")[0]) or ""
+    v = str(v).strip()
+    return v if v in PROFILES else None
+
+
 def main():
     repo_dir = sys.argv[1] if len(sys.argv) > 1 else "."
+    repo_full = sys.argv[2] if len(sys.argv) > 2 else ""
+    srv_default = server_default_profile(repo_full)
     cfg, cfgfile = load_config(repo_dir)
 
     if cfg is not None:
@@ -92,15 +119,15 @@ def main():
             profile = cfg.get("profile") or "custom"
         else:
             allow = []
-            profile = cfg.get("profile") or detect(repo_dir)
+            profile = cfg.get("profile") or srv_default or detect(repo_dir)
             checks = PROFILES.get(profile, PROFILES["generic"]) + UNIVERSAL
         disabled = sanitize_names(cfg.get("disable") or [])
         ignore = cfg.get("ignore") or []
         options = {k: v for k, v in cfg.items()
                    if k not in ("profile", "checks", "disable", "ignore")}
     else:
-        profile = detect(repo_dir)
-        source = "auto"
+        profile = srv_default or detect(repo_dir)
+        source = "server-default" if srv_default else "auto"
         allow = []
         checks = PROFILES.get(profile, PROFILES["generic"]) + UNIVERSAL
         disabled, ignore, options = [], [], {}

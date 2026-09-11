@@ -16,7 +16,7 @@ const https = require('https'), http = require('http'), crypto = require('crypto
 const APP_ID = '4150723';
 const KEY = fs.readFileSync('/etc/hermes-work-app/private-key.pem', 'utf8');
 const SEC = fs.readFileSync('/etc/hermes-work-app/webhook-secret', 'utf8').trim();
-const ALLOWED_OWNERS = ['SkyTechNerds', 'JUMO-GmbH-Co-KG', 'schimanski-antegma'];
+const ALLOWED_OWNERS = ['SkyTechNerds', 'JUMO-GmbH-Co-KG', 'schimanski-antegma', 'antegma'];
 const GRACE_MS = 120 * 1000;  // Report muss <=2min vor Head liegen, sonst gilt PR als offen
 const FRESH_MS = 90 * 1000;   // Head juenger als 90s -> normaler Webhook noch unterwegs, nicht racen
 
