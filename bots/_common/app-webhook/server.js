@@ -43,7 +43,12 @@ const PROJECT_WORKDIR = { jumo: '/opt/jumo-cms' };
 // 28 Commits in 80 Minuten, 27 Reviews. Die deterministischen Checks bleiben bei JEDEM
 // Push (billig + schnelles Feedback), nur der LLM-Review wird gebuendelt und nach Ablauf
 // des Fensters EINMAL nachgeholt (trailing debounce, damit der letzte Stand nie ausfaellt).
-const REVIEW_MIN_INTERVAL_MS = parseInt(process.env.CM_REVIEW_MIN_INTERVAL_MS || '600000', 10);
+// 5 min (13.09.2026, vorher 10). Die 10 stammten aus der Kostenreaktion auf faceid#18
+// (28 Pushes in 80 min -> 27 LLM-Laeufe). Fuer einen einzeln arbeitenden Entwickler war
+// das Warten nach dem LETZTEN Push aber zu lang — der PR fuehlte sich haengengeblieben
+// an. 5 min buendelt Bursts weiterhin (faceid#18 waere bei ~16 statt 27 Laeufen gelandet)
+// und halbiert die Wartezeit. Per CM_REVIEW_MIN_INTERVAL_MS uebersteuerbar.
+const REVIEW_MIN_INTERVAL_MS = parseInt(process.env.CM_REVIEW_MIN_INTERVAL_MS || '300000', 10);
 const LAST_REVIEW = new Map();       // repo#pr -> Zeitpunkt des letzten LLM-Reviews
 const DEFERRED_RUN = new Map();      // repo#pr -> Timer des nachgeholten Laufs
 
