@@ -12,6 +12,26 @@
  * ge-updatet, Inline dedupt. Der In-Flight-Guard verhindert vorzeitige Approves.
  */
 const https = require('https'), http = require('http'), crypto = require('crypto'), fs = require('fs');
+const path = require('path'), { spawn } = require('child_process');
+const BOTS_DIR = process.env.HERMES_BOTS_DIR || '/opt/hermes-work-commons/bots';
+
+// Ein von Hand auf GitHub aufgeloester Review-Thread loest bei uns NICHTS aus: der
+// Handler reagiert auf push / Antwort-Kommentar / Mention, und der Event
+// `pull_request_review_thread` kommt gar nicht erst an (die App ist nicht dafuer
+// angemeldet). Ein PR, dessen Findings der Entwickler direkt in der Oberflaeche
+// abhakt, blieb deshalb dauerhaft ohne Approve — obwohl alles erledigt war
+// (HA#556: 5 Threads aufgeloest, Bewertung stand noch auf "5 offen").
+// Deshalb bewertet der Sweep PRs mit aktuellem Report hier turnusmaessig nach.
+function approveAuto(repo, pr, token) {
+  return new Promise(res => {
+    const p = spawn('bash', [path.join(BOTS_DIR, '_common', 'pr-approve.sh'), repo, String(pr), 'auto'],
+      { env: { ...process.env, GH_TOKEN: token, GITHUB_TOKEN: token }, timeout: 120000 });
+    let out = '';
+    p.stdout.on('data', d => out += d); p.stderr.on('data', d => out += d);
+    p.on('close', () => res(out.trim().replace(/\n/g, ' | ').slice(-200)));
+    p.on('error', e => res('spawn-fail: ' + e.message));
+  });
+}
 
 const APP_ID = '4150723';
 const KEY = fs.readFileSync('/etc/hermes-work-app/private-key.pem', 'utf8');
@@ -87,6 +107,11 @@ function inject(repo, pr, instId, head) {
           const code = await inject(repo, pr, inst.id, head);
           log(`inject ${repo}#${pr.number} (head ${head.slice(0, 8)}, ${last ? 'Report veraltet' : 'kein Report'}) -> HTTP ${code}`);
           injected++;
+        } else {
+          // Report ist aktuell -> kein Doppel-Lauf. Nur die Approve-Frage neu stellen,
+          // damit ein von Hand aufgeloester Thread nicht unbemerkt liegen bleibt.
+          const r = await approveAuto(repo, pr.number, tok);
+          if (!/APPROVE-SKIP|DISMISS-NOOP|kein Report/.test(r)) log(`approve ${repo}#${pr.number}: ${r}`);
         }
       }
     }
