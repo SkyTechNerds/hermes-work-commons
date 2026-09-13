@@ -241,10 +241,11 @@ function installationToken(installationId) {
 
 // --- Script-Runner ---------------------------------------------------------
 
-function run(script, args, token, project) {
+function run(script, args, token, project, extraEnv) {
   return new Promise((resolve) => {
     const env = {
       ...process.env,
+      ...(extraEnv || {}),
       GH_TOKEN: token,
       GITHUB_TOKEN: token,
       // Eigener Workdir je Projekt (kein Listener-Race) — AUSSER wo ein Projekt
@@ -383,8 +384,11 @@ async function handlePullRequest(payload) {
   // bei "Checks liefen, aber kein Approve" stand im Log nicht, warum (faceid#16).
   if (reviewThrottled) {
     // Ein ausstehender Review darf NICHT als "alles sauber" durchgehen — die Bewertung
-    // macht der nachgeholte Lauf, wenn das Ergebnis wirklich vorliegt.
-    log(`approve ${repo}#${pr}: uebersprungen — Review steht noch aus`);
+    // macht der nachgeholte Lauf, wenn das Ergebnis wirklich vorliegt. Aber der PR muss
+    // es ANSAGEN, sonst sieht "Review laeuft noch" aus wie "fertig".
+    const _pd = await run(path.join(BOTS_DIR, '_common', 'pr-approve.sh'), [repo, String(pr), 'pending'],
+      token, project, { CM_PENDING_MIN: String(Math.max(1, Math.round(reviewWaitMs / 60000))) });
+    log(`approve ${repo}#${pr}: uebersprungen — Review steht noch aus ${(_pd.out || '').trim().slice(-80)}`);
   } else {
     const _mode = (runnerFail || reviewErr) ? 'dismiss' : 'auto';
     const _ap = await run(path.join(BOTS_DIR, '_common', 'pr-approve.sh'), [repo, String(pr), _mode], token, project);

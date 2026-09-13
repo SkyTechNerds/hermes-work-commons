@@ -154,8 +154,32 @@ do_dismiss() {
   done
 }
 
+# Der PR soll IMMER zeigen, woran er ist. Fehlte diese Meldung, sah ein PR, dessen
+# Logik-Review noch aussteht, exakt so aus wie einer, bei dem nichts mehr kommt —
+# der Entwickler loest alles auf, denkt "fertig", und Minuten spaeter landen neue
+# Findings. Genau dieses Gefuehl ("ich kann mich nicht drauf verlassen") entsteht
+# nicht durch fehlende Arbeit, sondern durch fehlende Ansage.
+post_pending() {
+  local d body tmp mins; d="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  mins="${CM_PENDING_MIN:-}"
+  if [ "$CM_LANG" = "en" ]; then
+    body="**Checks done — logic review still running.**"
+    body="$body"$'\n'"- The structural checks above are complete."
+    body="$body"$'\n'"- The logic review is queued${mins:+ (result in about ${mins} min)} — **please wait before merging**."
+  else
+    body="**Checks fertig — Logik-Review läuft noch.**"
+    body="$body"$'\n'"- Die strukturellen Checks oben sind vollständig."
+    body="$body"$'\n'"- Der Logik-Review steht noch aus${mins:+ (Ergebnis in ca. ${mins} min)} — **bitte vor dem Mergen abwarten**."
+  fi
+  tmp="$(mktemp)"; printf '%s\n%s\n' "$body" "<!-- codemole:bot -->" > "$tmp"
+  python3 "$d/post-comment.py" "$REPO" "$PR" "$tmp" "$READY_MARK" >/dev/null 2>&1 \
+    && echo "STATUS-KOMMENTAR: Review laeuft noch" || echo "STATUS-KOMMENTAR fehlgeschlagen" >&2
+  rm -f "$tmp"
+}
+
 case "$MODE" in
   approve) do_approve ;;
+  pending) post_pending ;;
   dismiss) do_dismiss ;;
   auto)
     # Laeuft gerade ein Logik-Review (egal ueber welchen Pfad)? Dann NICHT entscheiden —
